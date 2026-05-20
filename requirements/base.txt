@@ -1,0 +1,11 @@
+django>=5.0
+djangorestframework
+djangorestframework-simplejwt
+psycopg2-binary
+redis
+celery
+django-filter
+drf-spectacular
+pillow
+python-decouple
+reportlab
