@@ -1,0 +1,17 @@
+# Entorno virtual
+venv/
+
+# Variables de entorno - NUNCA subir esto
+.env
+
+# Archivos de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Base de datos local
+*.sqlite3
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
