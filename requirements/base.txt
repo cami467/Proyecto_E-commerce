@@ -9,3 +9,4 @@ drf-spectacular
 pillow
 python-decouple
 reportlab
+django-cors-headers

@@ -30,6 +30,7 @@ THIRD_PARTY_APPS = [
     "rest_framework_simplejwt",   # Autenticación con JWT
     "django_filters",             # Filtros en consultas
     "drf_spectacular",            # Documentación automática de la API
+    "corsheaders",                # Manejo de cabeceras CORS
 ]
 
 # Aplicaciones propias del proyecto
@@ -50,6 +51,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 # Middleware: capas intermedias que procesan las peticiones/respuestas
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -146,3 +148,8 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": False,             # No invalidar tokens antiguos
     "AUTH_HEADER_TYPES": ("Bearer",),              # Tipo de encabezado
 }
+
+# CORS
+CORS_ALLOWED_ORIGINS = [] # Lista de dominios permitidos para consumir la API
+CORS_ALLOW_ALL_ORIGINS = False # Si es True, permite cualquier origen (inseguro en producción)
+                               # Si está en False, solo se aceptan los orígenes definidos en CORS_ALLOWED_ORIGINS.
