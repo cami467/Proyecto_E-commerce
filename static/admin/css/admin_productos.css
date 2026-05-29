@@ -1,0 +1,61 @@
+/* ==============================================================
+   ADMIN PRODUCTOS - Estilos personalizados
+   Archivo: static/admin/css/admin_productos.css
+   ============================================================== */
+
+/* --- Badges de estado de stock --- */
+.badge-stock-ok {
+    background-color: #d4edda;
+    color: #155724;
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    font-weight: 500;
+}
+
+.badge-stock-bajo {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    font-weight: bold;
+}
+
+.badge-stock-vacio {
+    background-color: #f8d7da;
+    color: #721c24;
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    font-weight: bold;
+}
+
+/* --- Preview de imagenes --- */
+.preview-imagen {
+    height: 50px;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    max-width: 100px;
+    object-fit: cover;
+}
+
+.preview-sin-imagen {
+    color: #999;
+    font-style: italic;
+}
+
+/* --- Precio destacado --- */
+.precio-final {
+    font-weight: bold;
+    color: #155724;
+}
+
+/* --- Columnas del listado --- */
+.column-estado_stock {
+    min-width: 140px;
+}
+
+.column-preview_imagen {
+    min-width: 80px;
+}
