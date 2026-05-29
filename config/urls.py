@@ -1,5 +1,8 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,   # Vista para obtener access y refresh token (login)
     TokenRefreshView,      # Vista para renovar el access token
@@ -9,6 +12,7 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,    #  Documentación interactiva con Swagger UI
     SpectacularRedocView,      #  Documentación alternativa con Redoc
 )
+
 
 urlpatterns = [
     #  Panel de administración de Django
@@ -26,3 +30,8 @@ urlpatterns = [
     #  Rutas de la app "usuarios"
     path("api/usuarios/", include("apps.usuarios.urls")),  # Incluye las rutas definidas en apps/usuarios/urls.py
 ]
+
+# En desarrollo, sirve archivos estáticos y de medios desde sus directorios configurados
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
