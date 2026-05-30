@@ -29,6 +29,7 @@ urlpatterns = [
 
     #  Rutas de la app "usuarios"
     path("api/usuarios/", include("apps.usuarios.urls")),  # Incluye las rutas definidas en apps/usuarios/urls.py
+    path("api/productos/", include("apps.productos.urls")),  # Incluye las rutas definidas en apps/productos/urls.py
 ]
 
 # En desarrollo, sirve archivos estáticos y de medios desde sus directorios configurados
