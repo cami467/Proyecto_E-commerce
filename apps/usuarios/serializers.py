@@ -1,12 +1,22 @@
 from rest_framework import serializers
+from rest_framework import serializers as drf_serializers
 from rest_framework.validators import UniqueValidator
+from drf_spectacular.utils import extend_schema_field
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 
 Usuario = get_user_model()
 
 
+# ==============================================================================
+# SERIALIZER DE REGISTRO
+# ==============================================================================
+
 class RegistroSerializer(serializers.ModelSerializer):
+    """
+    Serializer para registro de nuevos usuarios.
+    Valida email unico, contraseña segura y coincidencia de passwords.
+    """
     email = serializers.EmailField(
         required=True,
         validators=[
@@ -32,7 +42,7 @@ class RegistroSerializer(serializers.ModelSerializer):
         fields = ["username", "email", "password", "password2", "telefono"]
 
     def validate_email(self, value):
-        """Normaliza el email a minúsculas."""
+        """Normaliza el email a minusculas."""
         return value.lower()
 
     def validate_password(self, value):
@@ -59,7 +69,15 @@ class RegistroSerializer(serializers.ModelSerializer):
         return Usuario.objects.create_user(**validated_data)
 
 
+# ==============================================================================
+# SERIALIZER DE PERFIL
+# ==============================================================================
+
 class UsuarioSerializer(serializers.ModelSerializer):
+    """
+    Serializer para ver y editar el perfil del usuario autenticado.
+    Incluye validacion de email unico excluyendo al usuario actual.
+    """
     nombre_completo = serializers.SerializerMethodField()
     email = serializers.EmailField(required=True)
 
@@ -76,8 +94,12 @@ class UsuarioSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "date_joined"]
 
+    @extend_schema_field(drf_serializers.CharField(allow_null=True))
     def get_nombre_completo(self, obj):
-        """Genera nombre completo dinámicamente o usa username como fallback."""
+        """
+        Genera nombre completo dinamicamente.
+        Usa username como fallback si no hay nombre.
+        """
         nombre = f"{obj.first_name} {obj.last_name}".strip()
         return nombre if nombre else obj.username
 
