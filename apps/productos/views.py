@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters import rest_framework as django_filters
 from django.db.models import Prefetch
+from drf_spectacular.utils import extend_schema
 
 from core.permissions import IsAdminOrReadOnly
 from .models import Categoria, Producto, Variante, ImagenProducto
@@ -186,6 +187,7 @@ class ProductoViewSet(SerializerContextMixin, viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
+    @extend_schema(operation_id="producto_variantes_list")
     @action(detail=True, methods=["get"], url_path="variantes", url_name="variantes-por-producto")
     def variantes(self, request, slug=None):
         """
