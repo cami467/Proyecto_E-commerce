@@ -186,7 +186,7 @@ class ProductoViewSet(SerializerContextMixin, viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
-    @action(detail=True, methods=["get"], url_path="variantes")
+    @action(detail=True, methods=["get"], url_path="variantes", url_name="variantes-por-producto")
     def variantes(self, request, slug=None):
         """
         Lista variantes activas de un producto con paginacion.
