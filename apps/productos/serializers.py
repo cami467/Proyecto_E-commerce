@@ -132,7 +132,8 @@ class VarianteListSerializer(serializers.ModelSerializer):
         decimal_places=2,
         read_only=True
     )
-
+    tiene_stock = serializers.BooleanField(read_only=True) 
+    
     class Meta:
         model = Variante
         fields = [
