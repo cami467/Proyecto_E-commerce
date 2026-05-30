@@ -1,4 +1,7 @@
+from decimal import Decimal
 from rest_framework import serializers
+from rest_framework import serializers as drf_serializers
+from drf_spectacular.utils import extend_schema_field
 from .models import Categoria, Producto, Variante, ImagenProducto
 
 
@@ -7,7 +10,7 @@ from .models import Categoria, Producto, Variante, ImagenProducto
 # ==============================================================================
 
 class CategoriaListSerializer(serializers.ModelSerializer):
-    """Serializer resumido para listados de categorias."""
+    """Serializer para listados de categorias."""
 
     class Meta:
         model = Categoria
@@ -38,6 +41,7 @@ class CategoriaSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "slug"]
 
+    @extend_schema_field(drf_serializers.ListField())
     def get_subcategorias(self, obj):
         """Retorna subcategorias activas limitando profundidad a 3 niveles."""
         depth = self.context.get("depth", 0)
@@ -50,6 +54,7 @@ class CategoriaSerializer(serializers.ModelSerializer):
             context={**self.context, "depth": depth + 1},
         ).data
 
+    @extend_schema_field(drf_serializers.IntegerField())
     def get_cantidad_productos(self, obj):
         """
         Usa anotacion SQL si existe, sino hace consulta directa.
@@ -103,6 +108,7 @@ class ImagenProductoSerializer(serializers.ModelSerializer):
         fields = ["id", "url", "es_principal", "orden"]
         read_only_fields = ["id"]
 
+    @extend_schema_field(drf_serializers.URLField(allow_null=True))
     def get_url(self, obj):
         """Retorna URL absoluta protegida contra archivos inexistentes."""
         request = self.context.get("request")
@@ -240,6 +246,7 @@ class ProductoListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "slug"]
 
+    @extend_schema_field(drf_serializers.URLField(allow_null=True))
     def get_imagen_principal(self, obj):
         """
         Obtiene la imagen principal del producto.
