@@ -128,8 +128,8 @@ class VarianteListSerializer(serializers.ModelSerializer):
     """Serializer resumido de Variante para listados."""
 
     precio_total = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+        max_digits=12,
+        decimal_places=0,
         read_only=True
     )
     tiene_stock = serializers.BooleanField(read_only=True) 
@@ -156,8 +156,8 @@ class VarianteSerializer(serializers.ModelSerializer):
         read_only=True
     )
     precio_total = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+        max_digits=12,
+        decimal_places=0,
         read_only=True
     )
     tiene_stock = serializers.BooleanField(read_only=True)
@@ -225,8 +225,8 @@ class ProductoListSerializer(serializers.ModelSerializer):
         read_only=True
     )
     precio_con_descuento = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+        max_digits=12,
+        decimal_places=0,
         read_only=True
     )
     imagen_principal = serializers.SerializerMethodField()
@@ -281,8 +281,8 @@ class ProductoSerializer(serializers.ModelSerializer):
     variantes = VarianteSerializer(many=True, read_only=True)
     imagenes = ImagenProductoSerializer(many=True, read_only=True)
     precio_con_descuento = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+        max_digits=12,
+        decimal_places=0,
         read_only=True
     )
 
