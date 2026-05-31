@@ -137,9 +137,9 @@ class Producto(ModeloBase):
     slug = models.SlugField(unique=True, max_length=255)
     descripcion = models.TextField(blank=True)
     precio_base = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.00"))]
+        max_digits=12,
+        decimal_places=0,
+        validators=[MinValueValidator(Decimal("0"))]
     )
     porcentaje_descuento = models.DecimalField(
         max_digits=5,
@@ -170,13 +170,13 @@ class Producto(ModeloBase):
     @property
     def precio_con_descuento(self):
         """
-        Calcula el precio final con precision decimal.
-        Usa Decimal para evitar errores de punto flotante en precios.
+        Calcula el precio final en guaranies.
+        El Guarani no tiene decimales, se redondea al entero mas cercano.
         """
         factor = Decimal("1.00") - (
             self.porcentaje_descuento / Decimal("100.00")
         )
-        return (self.precio_base * factor).quantize(Decimal("0.01"))
+        return (self.precio_base * factor).quantize(Decimal("1"))
 
 
 class Variante(ModeloBase):
@@ -201,8 +201,8 @@ class Variante(ModeloBase):
         ],
     )
     modificador_precio = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+        max_digits=12,
+        decimal_places=0,
         default=0
     )
     inventario = models.PositiveIntegerField(default=0)
@@ -219,10 +219,10 @@ class Variante(ModeloBase):
 
     @property
     def precio_total(self):
-        """Calcula el precio final de la variante con precision decimal."""
+        """Calcula el precio final de la variante en Guaranies."""
         return (
             self.producto.precio_con_descuento + self.modificador_precio
-        ).quantize(Decimal("0.01"))
+        ).quantize(Decimal("1"))
 
     @property
     def tiene_stock(self):
