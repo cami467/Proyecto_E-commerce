@@ -110,8 +110,15 @@ AUTH_USER_MODEL = "usuarios.Usuario"
 # Configuración regional
 LANGUAGE_CODE = "es-py"           # Español de Paraguay
 TIME_ZONE = "America/Asuncion"    # Zona horaria local
-USE_I18N = True                   # Internacionalización
+USE_I18N = True    
+USE_L10N = True                  # Internacionalización
 USE_TZ = True                     # Uso de zonas horarias
+
+# Formato monetario de Paraguay - Guaranies
+DECIMAL_SEPARATOR = "," # Define que los decimales se separan con coma (ejemplo: 123,45).
+THOUSAND_SEPARATOR = "." # Define que los miles se separan con punto (ejemplo: 1.234.567).
+USE_THOUSAND_SEPARATOR = True # Activa el uso del separador de miles en la representación de números.
+NUMBER_GROUPING = 3 # Indica que los números se agrupan cada 3 dígitos (ejemplo: 1.234.567).
 
 # Archivos estáticos
 STATIC_URL = "static/"
