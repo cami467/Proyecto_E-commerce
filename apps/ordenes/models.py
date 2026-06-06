@@ -163,7 +163,8 @@ class Orden(ModeloBase):
         usuario_accion=None,
         costo_envio=0,
         monto_descuento=0,
-        codigo_cupon=""
+        codigo_cupon="",
+        notas=""
     ):
         """
         Crea una orden desde el carrito del usuario.
@@ -204,6 +205,7 @@ class Orden(ModeloBase):
                 costo_envio=costo_envio,
                 monto_descuento=monto_descuento,
                 codigo_cupon=codigo_cupon,
+                notas=notas, 
             )
 
             # Crear items y actualizar stock en lote
