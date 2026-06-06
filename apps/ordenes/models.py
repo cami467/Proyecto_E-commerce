@@ -104,6 +104,16 @@ class Orden(ModeloBase):
     @property
     def puede_confirmarse(self):
         return self.estado == self.Estado.PENDING
+    
+    @property
+    def numero_orden_display(self) -> str:
+        """
+        Identificador legible de la orden para mostrar al usuario.
+        Usa los primeros 8 caracteres del UUID en mayúsculas.
+        Ejemplo: #A3F2B1C4
+        """
+        return f"#{str(self.id)[:8].upper()}" if self.id else "#NUEVA"
+    
 
     def _cambiar_estado(self, nuevo_estado, usuario_accion=None, comentario=""):
         """
