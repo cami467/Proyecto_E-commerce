@@ -3,6 +3,7 @@ from rest_framework import serializers
 from rest_framework import serializers as drf_serializers
 from drf_spectacular.utils import extend_schema_field
 from .models import Categoria, Producto, Variante, ImagenProducto
+from rest_framework.validators import UniqueTogetherValidator
 
 
 # ==============================================================================
@@ -310,6 +311,17 @@ class ProductoSerializer(serializers.ModelSerializer):
             "precio_con_descuento",
             "fecha_creacion"
         ]
+        
+        # ─── MODIFICACIÓN ──────────────────────────────────────────
+        # Captura el error de duplicados ANTES de ir a la base de datos
+        validators = [
+            UniqueTogetherValidator(
+                queryset=Producto.objects.all(),
+                fields=['nombre', 'categoria'],
+                message="Ya existe un producto con este nombre en esta categoría."
+            )
+        ]
+        # ──────────────────────────────────────────────────────────────────────
 
     def validate_nombre(self, value):
         """Normaliza el nombre a titulo."""

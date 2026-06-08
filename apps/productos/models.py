@@ -164,7 +164,8 @@ class Producto(ModeloBase):
         constraints = [
             UniqueConstraint(
                 fields=["nombre", "categoria"],
-                name="unique_nombre_por_categoria"
+                name="unique_nombre_por_categoria",
+                violation_error_message="Ya existe un producto con este nombre en esta categoría."
             )
         ]
         # ────────────────────────────────────────────────────────────────────
