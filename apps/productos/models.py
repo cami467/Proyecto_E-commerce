@@ -158,6 +158,17 @@ class Producto(ModeloBase):
         verbose_name = "Producto"
         verbose_name_plural = "Productos"
         ordering = ["-fecha_creacion"]
+        
+        # ─── MODIFICACIÓN  ──────────────────────────────────────────
+        # Evita que se dupliquen productos con el mismo nombre en la misma categoría
+        constraints = [
+            UniqueConstraint(
+                fields=["nombre", "categoria"],
+                name="unique_nombre_por_categoria"
+            )
+        ]
+        # ────────────────────────────────────────────────────────────────────
+
 
     def __str__(self):
         return self.nombre
