@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.db.models import Count, Q
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from .models import Categoria, Producto, Variante, ImagenProducto
 
 
@@ -23,12 +24,12 @@ class PreviewImagenMixin:
         if obj.imagen and hasattr(obj.imagen, "url"):
             try:
                 return format_html(
-                    '<img src="{}" class="preview-imagen" />',
+                    '<img src="{0}" class="preview-imagen" />',
                     obj.imagen.url,
                 )
             except ValueError:
                 pass
-        return format_html(
+        return mark_safe(
             '<span class="preview-sin-imagen">Sin imagen</span>'
         )
     preview_imagen.short_description = "Vista previa"
@@ -200,9 +201,10 @@ class ProductoAdmin(admin.ModelAdmin):
         )
 
     def precio_final(self, obj):
+        precio_formateado = "{:,.0f}".format(int(obj.precio_con_descuento))
         return format_html(
-            '<span class="precio-final">$ {}</span>',
-            obj.precio_con_descuento
+            '<span style="font-weight:bold;color:#155724;">Gs. {0}</span>',
+            precio_formateado,
         )
     precio_final.short_description = "Precio final"
 
@@ -264,16 +266,16 @@ class VarianteAdmin(admin.ModelAdmin):
         Muestra el estado del stock con badges CSS.
         """
         if obj.inventario <= 0:
-            return format_html(
+            return mark_safe(
                 '<span class="badge-stock-vacio">🔴 Sin stock (0)</span>'
             )
         elif obj.requiere_reposicion:
             return format_html(
-                '<span class="badge-stock-bajo">🟠 Stock bajo ({})</span>',
+                '<span class="badge-stock-bajo">🟠 Stock bajo ({0})</span>',
                 obj.inventario,
             )
         return format_html(
-            '<span class="badge-stock-ok">🟢 OK ({})</span>',
+            '<span class="badge-stock-ok">🟢 OK ({0})</span>',
             obj.inventario,
         )
     estado_stock.short_description = "Estado stock"
