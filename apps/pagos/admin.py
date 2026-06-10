@@ -190,11 +190,16 @@ class PagoAdmin(admin.ModelAdmin):
     estado_badge.admin_order_field = "estado"
 
     def monto_display(self, obj):
-        """Muestra el monto en Guaranies formateado."""
+        """
+        Formatea el monto ANTES de pasarlo a format_html.
+        format_html convierte los argumentos a SafeString antes
+        de formatear, por eso {:,.0f} falla si se pasa el valor directamente.
+        La solución es pre-formatear el número como string primero.
+        """
+        monto_formateado = "{:,.0f}".format(int(obj.monto))
         return format_html(
-            '<span style="font-weight:bold;color:#155724;">'
-            'Gs. {:,.0f}</span>',
-            obj.monto
+            '<span style="font-weight:bold;color:#155724;">Gs. {}</span>',
+            monto_formateado
         )
     monto_display.short_description = "Monto (Gs.)"
     monto_display.admin_order_field = "monto"
