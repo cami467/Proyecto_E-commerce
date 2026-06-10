@@ -194,7 +194,7 @@ class PagoAdmin(admin.ModelAdmin):
         return format_html(
             '<span style="font-weight:bold;color:#155724;">'
             'Gs. {:,.0f}</span>',
-            obj.monto
+            float(obj.monto)
         )
     monto_display.short_description = "Monto (Gs.)"
     monto_display.admin_order_field = "monto"
