@@ -1,0 +1,153 @@
+from decimal import Decimal
+from django.utils import timezone
+from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field, OpenApiTypes
+
+from .models import Cupon
+
+
+# ==============================================================================
+# SERIALIZER DE LECTURA — LISTADO
+# ==============================================================================
+
+class CuponListSerializer(serializers.ModelSerializer):
+    """
+    Serializer resumido para listado de cupones.
+    Solo expone los campos necesarios para que el frontend
+    muestre la lista sin cargar datos innecesarios.
+    """
+    tipo_display = serializers.CharField(
+        source="get_tipo_display",
+        read_only=True
+    )
+    esta_vigente = serializers.BooleanField(read_only=True)
+    usos_restantes = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cupon
+        fields = [
+            "id",
+            "codigo",
+            "tipo",
+            "tipo_display",
+            "valor",
+            "monto_minimo",
+            "esta_vigente",
+            "usos_restantes",
+            "fecha_vencimiento",
+            "esta_activo",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_usos_restantes(self, obj: Cupon):
+        """Retorna los usos restantes o None si no tiene límite."""
+        return obj.usos_restantes
+
+    def to_representation(self, instance: Cupon) -> dict:
+        """Convierte montos a enteros en Guaraníes."""
+        data = super().to_representation(instance)
+        data["monto_minimo"] = int(instance.monto_minimo)
+        if instance.tipo == Cupon.TipoDescuento.MONTO_FIJO:
+            data["valor"] = int(instance.valor)
+        return data
+
+
+# ==============================================================================
+# SERIALIZER DE LECTURA — DETALLE
+# ==============================================================================
+
+class CuponSerializer(serializers.ModelSerializer):
+    """
+    Serializer completo para el detalle de un cupón.
+    Incluye todos los campos incluyendo usuarios permitidos.
+    """
+    tipo_display = serializers.CharField(
+        source="get_tipo_display",
+        read_only=True
+    )
+    esta_vigente = serializers.BooleanField(read_only=True)
+    tiene_usos_disponibles = serializers.BooleanField(read_only=True)
+    usos_restantes = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cupon
+        fields = [
+            "id",
+            "codigo",
+            "descripcion",
+            "tipo",
+            "tipo_display",
+            "valor",
+            "monto_minimo",
+            "limite_usos",
+            "usos_actuales",
+            "usos_restantes",
+            "esta_vigente",
+            "tiene_usos_disponibles",
+            "fecha_inicio",
+            "fecha_vencimiento",
+            "usuarios_permitidos",
+            "esta_activo",
+            "fecha_creacion",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_usos_restantes(self, obj: Cupon):
+        return obj.usos_restantes
+
+    def to_representation(self, instance: Cupon) -> dict:
+        """Convierte montos a enteros en Guaraníes."""
+        data = super().to_representation(instance)
+        data["monto_minimo"] = int(instance.monto_minimo)
+        if instance.tipo == Cupon.TipoDescuento.MONTO_FIJO:
+            data["valor"] = int(instance.valor)
+        return data
+
+
+# ==============================================================================
+# SERIALIZER DE VALIDACIÓN DE CUPÓN
+# ==============================================================================
+
+class ValidarCuponSerializer(serializers.Serializer):
+    """
+    Serializer para validar un cupón antes de aplicarlo a una orden.
+
+    El frontend envía el código y el subtotal de la orden.
+    La API responde con el monto de descuento calculado.
+
+    Esto permite que el frontend muestre el descuento en tiempo real
+    antes de que el usuario confirme la compra.
+    """
+    codigo = serializers.CharField(
+        max_length=50,
+        help_text="Código del cupón a validar."
+    )
+    subtotal = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=0,
+        min_value=Decimal("0"),
+        help_text="Subtotal de la orden en Guaraníes."
+    )
+
+    def validate_codigo(self, value: str) -> str:
+        """Normaliza el código a mayúsculas."""
+        return value.strip().upper()
+
+
+class CuponAplicadoSerializer(serializers.Serializer):
+    """
+    Serializer de respuesta al validar un cupón exitosamente.
+
+    Retorna el descuento calculado y el total final
+    para que el frontend pueda mostrarlo al usuario.
+    """
+    codigo = serializers.CharField()
+    tipo = serializers.CharField()
+    tipo_display = serializers.CharField()
+    valor = serializers.DecimalField(max_digits=12, decimal_places=2)
+    subtotal_original = serializers.IntegerField()
+    monto_descuento = serializers.IntegerField()
+    total_con_descuento = serializers.IntegerField()
+    mensaje = serializers.CharField()
