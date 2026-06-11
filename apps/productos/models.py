@@ -89,6 +89,12 @@ class Categoria(ModeloBase):
         verbose_name = "Categoria"
         verbose_name_plural = "Categorias"
         ordering = ["nombre"]
+        constraints = [
+            UniqueConstraint(
+                fields=["nombre", "categoria_padre"],
+                name="unique_nombre_por_categoria_padre",
+            )
+        ]
 
     def __str__(self):
         return self.nombre

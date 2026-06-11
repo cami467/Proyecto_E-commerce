@@ -3,6 +3,7 @@ from rest_framework import serializers
 from rest_framework import serializers as drf_serializers
 from drf_spectacular.utils import extend_schema_field
 from .models import Categoria, Producto, Variante, ImagenProducto
+from apps.productos.models import Categoria
 from rest_framework.validators import UniqueTogetherValidator
 
 
@@ -65,9 +66,23 @@ class CategoriaSerializer(serializers.ModelSerializer):
             return obj._prod_activos_count
         return obj.productos.filter(esta_activo=True).count()
 
-    def validate_nombre(self, value):
-        """Normaliza el nombre a titulo."""
-        return value.strip().title()
+    def validate_nombre(self, value: str) -> str:
+        """Normaliza el nombre y verifica que no exista una categoria con el mismo nombre."""
+        
+        valor_normalizado = value.strip().title()
+        categoria_padre = self.initial_data.get("categoria_padre")
+        queryset = Categoria.objects.filter(
+            nombre__iexact=valor_normalizado,
+            categoria_padre=categoria_padre
+        )
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                f"Ya existe una categoría llamada '{valor_normalizado}' "
+                f"en este nivel. Usá un nombre diferente."
+            )
+        return valor_normalizado
 
     def validate(self, data):
         """Evita ciclos en la jerarquia con limite de profundidad."""
