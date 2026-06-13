@@ -140,7 +140,13 @@ class CuponAdmin(admin.ModelAdmin):
                 'padding:3px 8px;border-radius:4px;font-weight:bold;">'
                 'Inactivo</span>'
             )
-        if not obj.esta_vigente:
+        if ahora < obj.fecha_inicio:
+            return mark_safe(
+                '<span style="background:#cce5ff;color:#004085;'
+                'padding:3px 8px;border-radius:4px;font-weight:bold;">'
+                'Próximo</span>'
+            )
+        if obj.fecha_vencimiento and ahora > obj.fecha_vencimiento:
             return mark_safe(
                 '<span style="background:#f8d7da;color:#721c24;'
                 'padding:3px 8px;border-radius:4px;font-weight:bold;">'
@@ -184,6 +190,11 @@ class CuponAdmin(admin.ModelAdmin):
 
     def col_usos_restantes(self, obj):
         """Muestra los usos restantes del cupón."""
+        if obj._state.adding:
+            return mark_safe(
+                '<span style="color:#6c757d;">'
+                'Se calculará al guardar</span>'
+            )
         restantes = obj.usos_restantes
         if restantes is None:
             return "Sin límite"
