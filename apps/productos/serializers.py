@@ -121,8 +121,11 @@ class ImagenProductoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ImagenProducto
-        fields = ["id", "url", "es_principal", "orden"]
-        read_only_fields = ["id"]
+        fields = ["id", "producto", "imagen", "url", "es_principal", "orden"]
+        read_only_fields = ["id", "url"]
+        extra_kwargs = {
+            "imagen": {"write_only": True},
+        }
 
     @extend_schema_field(drf_serializers.URLField(allow_null=True))
     def get_url(self, obj):
