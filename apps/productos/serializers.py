@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 from rest_framework import serializers
 from rest_framework import serializers as drf_serializers
@@ -5,6 +6,7 @@ from drf_spectacular.utils import extend_schema_field
 from .models import Categoria, Producto, Variante, ImagenProducto
 from apps.productos.models import Categoria
 from rest_framework.validators import UniqueTogetherValidator
+
 
 
 # ==============================================================================
@@ -169,7 +171,8 @@ class VarianteListSerializer(serializers.ModelSerializer):
 
 class VarianteSerializer(serializers.ModelSerializer):
     """Serializer completo de Variante."""
-
+ 
+    sku = serializers.CharField(max_length=100)
     producto_nombre = serializers.CharField(
         source="producto.nombre",
         read_only=True
@@ -207,8 +210,17 @@ class VarianteSerializer(serializers.ModelSerializer):
         ]
 
     def validate_sku(self, value):
-        """Normaliza el SKU a mayusculas."""
-        return value.strip().upper()
+        """
+        Normaliza el SKU a mayusculas.
+        Se valida aqui (no via RegexValidator del modelo) para que
+        la normalizacion ocurra ANTES de la validacion de formato
+        """
+        valor = value.strip().upper()
+        if not re.match(r"^[A-Z0-9-]+$", valor):
+            raise serializers.ValidationError(
+                "El SKU solo permite letras, numeros y guiones (-)."
+            )
+        return valor
 
     def validate(self, data):
         """
