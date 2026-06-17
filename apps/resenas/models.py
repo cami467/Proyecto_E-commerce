@@ -77,7 +77,8 @@ class Resena(ModeloBase):
         Verifica si el usuario tiene alguna orden confirmada
         que contenga el producto.
         """
-        if self.pk is None:
+        es_creacion = self._state.adding
+        if es_creacion:
           self.es_verificada = self._calcular_verificacion()
         super().save(*args, **kwargs)
 
