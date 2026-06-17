@@ -57,9 +57,6 @@ class ResenaAdmin(admin.ModelAdmin):
     ]
     ordering = ["-fecha_creacion"]
     readonly_fields = [
-        "usuario",
-        "producto",
-        "calificacion",
         "es_verificada",
         "col_estrellas",
         "fecha_creacion",
@@ -75,6 +72,7 @@ class ResenaAdmin(admin.ModelAdmin):
             "fields": (
                 "usuario",
                 "producto",
+                "calificacion",
                 "col_estrellas",
                 "titulo",
                 "comentario",
@@ -94,11 +92,13 @@ class ResenaAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
     )
+    
+    # Bloquea campos dinámicamente si el registro ya existe
+    def get_readonly_fields(self, request, obj =None):
+        if obj:  # Si el objeto ya existe, no se puede cambiar el usuario ni el producto
+            return self.readonly_fields + ["usuario", "producto", "calificacion"]
+        return self.readonly_fields
 
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related(
-            "usuario", "producto"
-        )
 
     def col_usuario(self, obj):
         return obj.usuario.username
