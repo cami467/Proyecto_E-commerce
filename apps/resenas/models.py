@@ -77,7 +77,8 @@ class Resena(ModeloBase):
         Verifica si el usuario tiene alguna orden confirmada
         que contenga el producto.
         """
-        self.es_verificada = self._calcular_verificacion()
+        if not self.pk:
+          self.es_verificada = self._calcular_verificacion()
         super().save(*args, **kwargs)
 
     def _calcular_verificacion(self) -> bool:
@@ -101,4 +102,6 @@ class Resena(ModeloBase):
     @property
     def estrellas(self) -> str:
         """Retorna la calificacion como estrellas visuales."""
+        if self.calificacion is None:
+            return "Sin calificar"
         return "⭐" * self.calificacion + "☆" * (5 - self.calificacion)
