@@ -1,0 +1,30 @@
+{% extends "admin/change_list.html" %}
+
+{% block content_title %}
+<h1>{{ title }}</h1>
+{% if resumen_productos %}
+<div style="background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px; margin-bottom:20px;">
+    <h2 style="margin-top:0; font-size:15px;">Top 10 productos por calificación</h2>
+    <table style="width:100%; border-collapse:collapse;">
+        <thead>
+            <tr style="text-align:left; border-bottom:2px solid #eee;">
+                <th style="padding:6px 8px;">Producto</th>
+                <th style="padding:6px 8px;">Promedio</th>
+                <th style="padding:6px 8px;">Cantidad de reseñas</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for producto in resumen_productos %}
+            <tr style="border-bottom:1px solid #f0f0f0;">
+                <td style="padding:6px 8px;">{{ producto.nombre }}</td>
+                <td style="padding:6px 8px; font-weight:bold; color:#155724;">
+                    {{ producto.promedio_calificacion|floatformat:1 }} ⭐
+                </td>
+                <td style="padding:6px 8px;">{{ producto.total_resenas }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

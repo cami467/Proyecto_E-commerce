@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.utils.html import mark_safe
 from django.db.models import Avg, Count
 from .models import Resena
+from apps.productos.models import Producto
 
 
 # ==============================================================================
@@ -66,6 +67,7 @@ class ResenaAdmin(admin.ModelAdmin):
     list_per_page = 25
     date_hierarchy = "fecha_creacion"
     actions = [activar_resenas, desactivar_resenas]
+    change_list_template = "admin/resenas/resena/change_list.html"
 
     fieldsets = (
         ("Información de la reseña", {
@@ -98,7 +100,31 @@ class ResenaAdmin(admin.ModelAdmin):
         if obj:  # Si el objeto ya existe, no se puede cambiar el usuario ni el producto
             return self.readonly_fields + ["usuario", "producto", "calificacion"]
         return self.readonly_fields
+    
+    def changelist_view(self, request, extra_context=None):
+        """
+        Agrega al contexto del listado un resumen con el promedio
+        de calificación y la cantidad de reseñas por producto.
+        Usa annotate con Avg y Count para calcularlo en una sola
+        consulta SQL, evitando el problema N+1.
+        """
+        resumen_productos = (
+            Producto.objects.filter(resenas__esta_activo=True)
+            .annotate(
+                promedio_calificacion=Avg("resenas__calificacion"),
+                total_resenas=Count("resenas"),
+            )
+            .filter(total_resenas__gt=0)
+            .order_by("-promedio_calificacion")[:10]
+        )
 
+        extra_context = extra_context or {}
+        extra_context["resumen_productos"] = resumen_productos
+        return super().changelist_view(request, extra_context=extra_context)
+
+    # ------------------------------------------------------------------
+    # COLUMNAS PERSONALIZADAS
+    # ------------------------------------------------------------------
 
     def col_usuario(self, obj):
         return obj.usuario.username
