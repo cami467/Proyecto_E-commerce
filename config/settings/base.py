@@ -31,6 +31,7 @@ THIRD_PARTY_APPS = [
     "django_filters",             # Filtros en consultas
     "drf_spectacular",            # Documentación automática de la API
     "corsheaders",                # Manejo de cabeceras CORS
+    "django_celery_results",    # Almacena resultados de tareas de Celery en la base de datos
 ]
 
 # Aplicaciones propias del proyecto
@@ -44,6 +45,7 @@ LOCAL_APPS = [
     "apps.cupones",               # Cupones de descuento
     "apps.resenas",               # Reseñas de productos
     "apps.notificaciones",        # Notificaciones
+    
 ]
 
 # Registro de todas las apps
@@ -165,3 +167,36 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [] # Lista de dominios permitidos para consumir la API
 CORS_ALLOW_ALL_ORIGINS = False # Si es True, permite cualquier origen (inseguro en producción)
                                # Si está en False, solo se aceptan los orígenes definidos en CORS_ALLOWED_ORIGINS.
+                               
+
+# ==============================================================================
+# CONFIGURACIÓN DE CELERY
+# ==============================================================================
+
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+"""
+URL del broker (Redis) que Celery usa como cola de mensajes.
+En Docker, el host suele ser el nombre del servicio (ej: redis://redis:6379/0).
+"""
+
+CELERY_RESULT_BACKEND = "django-db"
+"""
+Guarda los resultados de las tareas en la base de datos usando
+django-celery-results. Permite consultar el estado de cada tarea
+desde el admin de Django.
+"""
+
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+"""
+Usa la misma zona horaria configurada en Django (America/Asuncion)
+para que los timestamps de las tareas sean consistentes.
+"""
+
+CELERY_TASK_TRACK_STARTED = True
+"""Permite ver en el admin cuándo una tarea pasó de PENDING a STARTED."""
+
+CELERY_TASK_TIME_LIMIT = 30 * 60
+"""Límite máximo de 30 minutos por tarea, para evitar tareas colgadas."""
