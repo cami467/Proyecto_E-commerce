@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from django.db.models import Prefetch
 
 from core.exceptions import CarritoVacio, StockInsuficiente, CuponInvalido
+from apps.cupones.models import Cupon
 from .models import Orden, ItemOrden, HistorialEstadoOrden
 from .serializers import (
     OrdenSerializer,
@@ -148,7 +149,7 @@ class OrdenViewSet(
                 "notas": "Entregar después de las 18hs."
             }
         """
-        from apps.cupones.models import Cupon
+        
 
         serializer = CrearOrdenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -156,7 +157,7 @@ class OrdenViewSet(
         costo_envio = serializer.validated_data["costo_envio"]
         codigo_cupon = serializer.validated_data["codigo_cupon"]
         notas = serializer.validated_data["notas"]
-
+        
         carrito = getattr(request.user, "carrito", None)
         monto_descuento = Decimal("0")
         cupon = None
