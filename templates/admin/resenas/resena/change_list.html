@@ -3,11 +3,11 @@
 {% block content_title %}
 <h1>{{ title }}</h1>
 {% if resumen_productos %}
-<div style="background:#fff; border:1px solid #ddd; border-radius:6px; padding:16px; margin-bottom:20px;">
-    <h2 style="margin-top:0; font-size:15px;">Top 10 productos por calificación</h2>
-    <table style="width:100%; border-collapse:collapse;">
+<div style="background:var(--body-bg); border:1px solid var(--border-color); border-radius:6px; padding:16px; margin-bottom:20px;">
+    <h2 style="margin-top:0; font-size:15px; color:var(--body-fg);">Top 10 productos por calificación</h2>
+    <table style="width:100%; border-collapse:collapse; color:var(--body-fg);">
         <thead>
-            <tr style="text-align:left; border-bottom:2px solid #eee;">
+            <tr style="text-align:left; border-bottom:2px solid var(--border-color);">
                 <th style="padding:6px 8px;">Producto</th>
                 <th style="padding:6px 8px;">Promedio</th>
                 <th style="padding:6px 8px;">Cantidad de reseñas</th>
@@ -15,9 +15,9 @@
         </thead>
         <tbody>
             {% for producto in resumen_productos %}
-            <tr style="border-bottom:1px solid #f0f0f0;">
+            <tr style="border-bottom:1px solid var(--border-color);">
                 <td style="padding:6px 8px;">{{ producto.nombre }}</td>
-                <td style="padding:6px 8px; font-weight:bold; color:#155724;">
+                <td style="padding:6px 8px; font-weight:bold; color:var(--success-fg, #28a745);">
                     {{ producto.promedio_calificacion|floatformat:1 }} ⭐
                 </td>
                 <td style="padding:6px 8px;">{{ producto.total_resenas }}</td>
