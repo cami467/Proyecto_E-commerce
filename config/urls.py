@@ -32,6 +32,9 @@ urlpatterns = [
     path("api/productos/", include("apps.productos.urls")),  # Incluye las rutas definidas en apps/productos/urls.py
     path("api/carrito/", include("apps.carrito.urls")),  # Incluye las rutas definidas en apps/carrito/urls.py
     path("api/ordenes/", include("apps.ordenes.urls")),  # Incluye las rutas definidas en apps/ordenes/urls.py
+    path("api/pagos/", include("apps.pagos.urls")), # Incluye las rutas definidas en apps/pagos/urls.py
+    path("api/cupones/", include("apps.cupones.urls")), # Incluye las rutas definidas en apps/cupones/urls.py
+    path("api/resenas/", include("apps.resenas.urls")), # Incluye las rutas definidas en apps/resenas/urls.py
 ]
 
 # En desarrollo, sirve archivos estáticos y de medios desde sus directorios configurados
