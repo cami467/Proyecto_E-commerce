@@ -1,10 +1,12 @@
+from decimal import Decimal
+
 from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Prefetch
 
-from core.exceptions import CarritoVacio, StockInsuficiente
+from core.exceptions import CarritoVacio, StockInsuficiente, CuponInvalido
 from .models import Orden, ItemOrden, HistorialEstadoOrden
 from .serializers import (
     OrdenSerializer,
@@ -23,8 +25,6 @@ class SerializerContextMixin:
     """
     Mixin reutilizable que garantiza que el request siempre
     esté disponible en el contexto del serializer.
-    Necesario para que campos como numero_orden_display funcionen
-    correctamente en todos los endpoints.
     """
     def get_serializer_context(self) -> dict:
         context = super().get_serializer_context()
@@ -44,26 +44,13 @@ class OrdenViewSet(
 ):
     """
     ViewSet de solo lectura para órdenes del usuario autenticado.
-
-    Un usuario solo puede ver sus propias órdenes.
-    La creación y cancelación se manejan como acciones separadas
-    para mantener semántica REST clara.
+    La creación y cancelación se manejan como acciones separadas.
 
     Endpoints disponibles:
-        GET    /api/ordenes/              - Listar mis órdenes (paginado)
-        GET    /api/ordenes/{id}/         - Detalle de una orden
-        POST   /api/ordenes/crear/        - Crear orden desde el carrito
+        GET    /api/ordenes/               - Listar mis órdenes (paginado)
+        GET    /api/ordenes/{id}/          - Detalle de una orden
+        POST   /api/ordenes/crear/         - Crear orden desde el carrito
         POST   /api/ordenes/{id}/cancelar/ - Cancelar una orden
-
-    Seguridad:
-        - Solo se retornan órdenes del usuario autenticado.
-        - Un usuario nunca puede ver ni cancelar órdenes de otro usuario.
-        - El filtro se aplica en get_queryset(), no en la vista individual,
-          para que la seguridad sea consistente en todos los endpoints.
-
-    Rendimiento:
-        - get_queryset() aplica select_related y prefetch_related
-          para evitar el problema N+1 en detalle y listado.
     """
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.OrderingFilter]
@@ -71,16 +58,6 @@ class OrdenViewSet(
     ordering = ["-fecha_creacion"]
 
     def get_queryset(self):
-        """
-        Retorna únicamente las órdenes del usuario autenticado.
-
-        Aplica prefetch optimizado según la acción:
-        - list: solo datos base, sin ítems ni historial.
-        - retrieve: carga completa con ítems, variantes y historial.
-
-        El filtro por usuario se aplica siempre, sin excepciones,
-        para prevenir acceso cruzado entre usuarios.
-        """
         usuario = self.request.user
         queryset = Orden.objects.filter(
             usuario=usuario
@@ -105,10 +82,6 @@ class OrdenViewSet(
         return queryset
 
     def get_serializer_class(self):
-        """
-        Usa el serializer resumido para listados y el completo
-        para detalle, creación y cancelación.
-        """
         if self.action == "list":
             return OrdenListSerializer
         if self.action == "crear":
@@ -117,61 +90,15 @@ class OrdenViewSet(
             return CancelarOrdenSerializer
         return OrdenSerializer
 
-    # ------------------------------------------------------------------
-    # ACCIÓN: CREAR ORDEN
-    # ------------------------------------------------------------------
-
-    @action(
-        detail=False,
-        methods=["post"],
-        url_path="crear",
-        url_name="crear"
-    )
-    def crear(self, request) -> Response:
+    def _obtener_orden_completa(self, orden_id):
         """
-        Crea una orden desde el carrito activo del usuario.
-
-        Flujo:
-            1. Valida los parámetros del request (costo_envio, cupon, notas).
-            2. Delega la lógica de negocio al servicio crear_orden_desde_carrito().
-            3. Retorna la orden completa con todos sus ítems.
-
-        Errores posibles:
-            400 - CarritoVacio: el usuario no tiene items en el carrito.
-            400 - StockInsuficiente: alguna variante no tiene stock suficiente.
-
-        POST /api/ordenes/crear/
-        Body (todos opcionales):
-            {
-                "costo_envio": 15000,
-                "codigo_cupon": "DESCUENTO10",
-                "notas": "Entregar después de las 18hs."
-            }
+        Helper reutilizable que retorna una orden con
+        todos sus ítems e historial prefetcheados.
+        Evita duplicar el mismo prefetch en crear() y cancelar().
         """
-        serializer = CrearOrdenSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        try:
-            orden = crear_orden_desde_carrito(
-                usuario=request.user,
-                costo_envio=serializer.validated_data["costo_envio"],
-                codigo_cupon=serializer.validated_data["codigo_cupon"],
-                notas=serializer.validated_data["notas"],
-            )
-        except CarritoVacio as exc:
-            return Response(
-                {"detail": str(exc)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except StockInsuficiente as exc:
-            return Response(
-                {"detail": str(exc)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        orden_completa = (
+        return (
             Orden.objects
-            .filter(pk=orden.pk)
+            .filter(pk=orden_id)
             .select_related("usuario")
             .prefetch_related(
                 Prefetch(
@@ -189,6 +116,105 @@ class OrdenViewSet(
             )
             .first()
         )
+
+    # ------------------------------------------------------------------
+    # ACCIÓN: CREAR ORDEN
+    # ------------------------------------------------------------------
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="crear",
+        url_name="crear"
+    )
+    def crear(self, request) -> Response:
+        """
+        Crea una orden desde el carrito activo del usuario.
+
+        Si se envía codigo_cupon, se valida y se calcula el descuento
+        ANTES de crear la orden, usando la misma lógica de negocio
+        que el endpoint /api/cupones/validar/.
+
+        Errores posibles:
+            400 - CarritoVacio: el usuario no tiene items en el carrito.
+            400 - StockInsuficiente: alguna variante no tiene stock suficiente.
+            400 - CuponInvalido: el cupón no es aplicable.
+
+        POST /api/ordenes/crear/
+        Body (todos opcionales):
+            {
+                "costo_envio": 15000,
+                "codigo_cupon": "DESCUENTO10",
+                "notas": "Entregar después de las 18hs."
+            }
+        """
+        from apps.cupones.models import Cupon
+
+        serializer = CrearOrdenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        costo_envio = serializer.validated_data["costo_envio"]
+        codigo_cupon = serializer.validated_data["codigo_cupon"]
+        notas = serializer.validated_data["notas"]
+
+        carrito = getattr(request.user, "carrito", None)
+        monto_descuento = Decimal("0")
+        cupon = None
+
+        if codigo_cupon:
+            if carrito is None or not carrito.items.exists():
+                return Response(
+                    {"detail": "El carrito no contiene productos."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            subtotal_actual = sum(
+                item.subtotal for item in carrito.items.all()
+            )
+
+            try:
+                cupon = Cupon.objects.get(codigo=codigo_cupon)
+            except Cupon.DoesNotExist:
+                return Response(
+                    {"detail": f"El cupón '{codigo_cupon}' no existe."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                cupon.validar(usuario=request.user, subtotal=subtotal_actual)
+            except CuponInvalido as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            monto_descuento = cupon.calcular_descuento(subtotal_actual)
+
+        # Esto se ejecuta SIEMPRE, haya o no cupón.
+        try:
+            orden = crear_orden_desde_carrito(
+                usuario=request.user,
+                costo_envio=costo_envio,
+                monto_descuento=monto_descuento,
+                codigo_cupon=codigo_cupon,
+                notas=notas,
+            )
+        except CarritoVacio as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except StockInsuficiente as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Solo incrementamos el uso si efectivamente se usó un cupón válido.
+        if cupon is not None:
+            cupon.incrementar_uso()
+
+        orden_completa = self._obtener_orden_completa(orden.pk)
 
         response_serializer = OrdenSerializer(
             orden_completa,
@@ -212,19 +238,6 @@ class OrdenViewSet(
     def cancelar(self, request, pk=None) -> Response:
         """
         Cancela una orden existente del usuario autenticado.
-
-        La seguridad se garantiza en dos capas:
-            1. get_queryset() filtra por usuario, así que get_object()
-               nunca retorna una orden de otro usuario (retorna 404).
-            2. orden.puede_cancelarse verifica que el estado lo permita.
-
-        Si la orden no puede cancelarse por su estado actual,
-        retorna 409 Conflict con un mensaje descriptivo.
-
-        Flujo al cancelar exitosamente:
-            - El stock de cada variante se devuelve automáticamente.
-            - Se registra la cancelación en el historial de estados.
-            - Se retorna la orden actualizada con estado "cancelled".
 
         POST /api/ordenes/{id}/cancelar/
         Body (opcional):
@@ -260,26 +273,7 @@ class OrdenViewSet(
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        orden_actualizada = (
-            Orden.objects
-            .filter(pk=orden.pk)
-            .select_related("usuario")
-            .prefetch_related(
-                Prefetch(
-                    "historial_estados",
-                    queryset=HistorialEstadoOrden.objects.select_related(
-                        "cambiado_por"
-                    ).order_by("-fecha")
-                ),
-                Prefetch(
-                    "items",
-                    queryset=ItemOrden.objects.select_related(
-                        "variante__producto"
-                    ).order_by("fecha_creacion")
-                ),
-            )
-            .first()
-        )
+        orden_actualizada = self._obtener_orden_completa(orden.pk)
 
         response_serializer = OrdenSerializer(
             orden_actualizada,
