@@ -133,6 +133,12 @@ class Producto(ModeloBase):
     Producto principal del catalogo.
     El stock se maneja en Variante, no aqui.
     """
+    
+    class TasaIVA(models.TextChoices):
+        DIEZ = "10", "10% (tasa general)"
+        CINCO = "5", "5% (tasa reducida)"
+        EXENTO = "0", "Exento"
+        
     categoria = models.ForeignKey(
         Categoria,
         on_delete=models.SET_NULL,
@@ -156,6 +162,17 @@ class Producto(ModeloBase):
             MaxValueValidator(Decimal("100.00"))
         ],
     )
+    tasa_iva = models.CharField(
+        max_length=2,
+        choices=TasaIVA.choices,
+        default=TasaIVA.DIEZ,
+        help_text=(
+            "Tasa de IVA aplicable a este producto. "
+            "En Paraguay el IVA va incluido dentro del precio final, "
+            "no se suma aparte."
+        )
+    )
+    
     es_destacado = models.BooleanField(default=False, db_index=True)
 
     objects = ProductoManager()
@@ -195,6 +212,28 @@ class Producto(ModeloBase):
             self.porcentaje_descuento / Decimal("100.00")
         )
         return (self.precio_base * factor).quantize(Decimal("1"))
+    
+    @property
+    def monto_iva_incluido(self) -> Decimal:
+        """
+        Calcula cuánto del precio_con_descuento corresponde a IVA.
+
+        En Paraguay el IVA va INCLUIDO en el precio (no se suma aparte).
+        La fórmula extrae el IVA contenido en el precio final:
+            IVA = precio_final - (precio_final / (1 + tasa))
+
+        Para tasa 10%: IVA = precio_final / 11
+        Para tasa 5%:  IVA = precio_final / 21
+        Para exento:   IVA = 0
+        """
+        if self.tasa_iva == self.TasaIVA.EXENTO:
+            return Decimal("0")
+
+        tasa_decimal = Decimal(self.tasa_iva) / Decimal("100")
+        divisor = Decimal("1") + tasa_decimal
+        precio_final = self.precio_con_descuento
+
+        return (precio_final - (precio_final / divisor)).quantize(Decimal("1"))
 
 
 class Variante(ModeloBase):
