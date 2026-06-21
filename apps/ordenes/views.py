@@ -5,6 +5,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Prefetch
+from django.http import HttpResponse
+from .factura import generar_factura_pdf
 
 from core.exceptions import CarritoVacio, StockInsuficiente, CuponInvalido
 from apps.cupones.models import Cupon
@@ -281,3 +283,45 @@ class OrdenViewSet(
             context=self.get_serializer_context()
         )
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+    
+    # ------------------------------------------------------------------
+    # ACCIÓN: DESCARGAR FACTURA
+    # ------------------------------------------------------------------
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="factura",
+        url_name="factura"
+    )
+    def factura(self, request, pk=None) -> HttpResponse:
+        """
+        Genera y descarga el PDF de la factura legal de una orden.
+
+        Solo disponible para órdenes que ya fueron confirmadas
+        (no tiene sentido facturar una orden pendiente o cancelada).
+
+        GET /api/ordenes/{id}/factura/
+        Respuesta: application/pdf descargable.
+        """
+        orden = self.get_object()
+
+        estados_facturables = ["confirmed", "processing", "shipped", "delivered"]
+        if orden.estado not in estados_facturables:
+            return Response(
+                {
+                    "detail": (
+                        f"No se puede generar factura de una orden en estado "
+                        f"'{orden.get_estado_display()}'."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+
+        orden_completa = self._obtener_orden_completa(orden.pk)
+        buffer = generar_factura_pdf(orden_completa)
+        nombre_archivo = f"factura_{orden_completa.numero_orden_display.replace('#', '')}.pdf"
+
+        response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{nombre_archivo}"'
+        return response
