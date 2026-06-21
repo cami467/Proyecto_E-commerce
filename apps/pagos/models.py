@@ -146,6 +146,9 @@ class Pago(ModeloBase):
 
         Es idempotente: si ya esta aprobado o reembolsado
         no hace nada para evitar dobles procesamientos.
+        
+        Dispara una notificacion asincrona al usuario una vez
+        confirmado el cambio de estado.
         """
         if self.estado in [self.Estado.APPROVED, self.Estado.REFUNDED]:
             return
@@ -158,8 +161,13 @@ class Pago(ModeloBase):
                     "respuesta_pasarela": respuesta or {},
                 }
             )
-            # TODO: Notificar a la orden cuando se implemente
-            # self.orden.marcar_como_pagada()
+            
+        from apps.notificaciones.tasks import notificar_pago_aprobado
+        notificar_pago_aprobado.delay(
+            usuario_id=self.orden.usuario.pk,
+            pago_id=str(self.id),
+            monto=self.monto,
+        )
 
     def marcar_rechazado(self, respuesta=None):
         """
@@ -178,6 +186,12 @@ class Pago(ModeloBase):
                     "respuesta_pasarela": respuesta or {},
                 }
             )
+        
+        from apps.notificaciones.tasks import notificar_pago_rechazado
+        notificar_pago_rechazado.delay(
+            usuario_id=self.orden.usuario.pk,
+            pago_id=str(self.id),
+        )
 
     def marcar_reembolsado(self, respuesta=None):
         """
