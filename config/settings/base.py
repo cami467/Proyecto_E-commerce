@@ -204,7 +204,7 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 # ==============================================================================
 # DATOS DE LA EMPRESA PARA FACTURACIÓN
 # ==============================================================================
-
+URL_BASE_SISTEMA = config("URL_BASE_SISTEMA", default="http://127.0.0.1:8000")
 EMPRESA_RAZON_SOCIAL = config("EMPRESA_RAZON_SOCIAL", default="Mi Empresa")
 EMPRESA_RUC = config("EMPRESA_RUC", default="0000000-0")
 EMPRESA_TIMBRADO = config("EMPRESA_TIMBRADO", default="00000000")
