@@ -229,6 +229,7 @@ class Orden(ModeloBase):
                         precio_unitario=item.variante.precio_total,
                         nombre_producto=item.variante.producto.nombre,
                         nombre_variante=item.variante.nombre,
+                        tasa_iva=item.variante.producto.tasa_iva,
                     )
                 )
                 item.variante.inventario -= item.cantidad
@@ -289,6 +290,15 @@ class ItemOrden(ModeloBase):
     )
     nombre_producto = models.CharField(max_length=255)
     nombre_variante = models.CharField(max_length=255)
+    tasa_iva = models.CharField(
+        max_length=2,
+        default="10",
+        help_text=(
+            "Tasa de IVA congelada al momento de la compra. "
+            "Se guarda aquí para que la factura sea consistente "
+            "aunque la tasa del producto cambie despues."
+        )
+    )
 
     objects = ItemOrdenManager()
 
@@ -304,6 +314,21 @@ class ItemOrden(ModeloBase):
     @property
     def subtotal(self):
         return Decimal(str(self.precio_unitario)) * self.cantidad
+    
+    @property
+    def monto_iva(self) -> Decimal:
+        """
+        Calcula el IVA incluido en el subtotal de este item,
+        usando la tasa_iva congelada al momento de la compra.
+        """
+        if self.tasa_iva == "0":
+            return Decimal("0")
+
+        tasa_decimal = Decimal(self.tasa_iva) / Decimal("100")
+        divisor = Decimal("1") + tasa_decimal
+        subtotal = self.subtotal
+
+        return (subtotal - (subtotal / divisor)).quantize(Decimal("1"))
 
 
 class HistorialEstadoOrden(ModeloBase):
