@@ -1,3 +1,5 @@
+import os
+from reportlab.platypus import Image
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
@@ -99,6 +101,40 @@ def generar_factura_pdf(orden) -> BytesIO:
     )
 
     elementos = []
+    
+    # ------------------------------------------------------------------
+    # LOGOS DE LA EMPRESA
+    # ------------------------------------------------------------------
+    def _cargar_logo(nombre_archivo, ancho=1.0 * cm, alto=1.4 * cm):
+        """
+        Carga un logo desde static/facturas/ como imagen de ReportLab.
+        Si el archivo no existe, retorna None en lugar de fallar,
+        para que la factura siga generándose aunque falte un logo.
+        """
+        ruta = os.path.join(settings.BASE_DIR, "static", "facturas", nombre_archivo)
+        if not os.path.exists(ruta):
+            return None
+        return Image(ruta, width=ancho, height=alto)
+
+    logo_eimek = _cargar_logo("logo_eimek.jpg")
+    logo_ecp = _cargar_logo("ecp.jpg")
+    logo_good = _cargar_logo("good_of_pizz.jpg")
+
+    logos_disponibles = [logo for logo in (logo_eimek, logo_ecp, logo_good) if logo is not None]
+
+    if logos_disponibles:
+        fila_logos = Table(
+            [logos_disponibles],
+            colWidths=[1.1 * cm] * len(logos_disponibles),
+        )
+        fila_logos.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (1, 0), (-1, -1), 4),
+        ]))
+    else:
+        fila_logos = Paragraph("", estilos["Normal"])
 
     # ------------------------------------------------------------------
     # ENCABEZADO: DATOS DE LA EMPRESA + RECUADRO DE FACTURA
@@ -110,6 +146,15 @@ def generar_factura_pdf(orden) -> BytesIO:
         f"Tel: {settings.EMPRESA_TELEFONO}",
         estilo_empresa,
     )
+    
+    bloque_empresa = Table(
+        [[fila_logos, datos_empresa]],
+        colWidths=[3.6 * cm if logos_disponibles else 0.1 * cm, 6.8 * cm],
+    )
+    bloque_empresa.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+    ]))
 
     numero_factura = _numero_factura_display(orden)
     recuadro_factura = Table(
@@ -133,7 +178,7 @@ def generar_factura_pdf(orden) -> BytesIO:
     ]))
 
     tabla_encabezado = Table(
-        [[datos_empresa, recuadro_factura]],
+        [[bloque_empresa, recuadro_factura]],
         colWidths=[10.5 * cm, 7 * cm],
     )
     tabla_encabezado.setStyle(TableStyle([
