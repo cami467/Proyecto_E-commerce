@@ -200,3 +200,16 @@ CELERY_TASK_TRACK_STARTED = True
 
 CELERY_TASK_TIME_LIMIT = 30 * 60
 """Límite máximo de 30 minutos por tarea, para evitar tareas colgadas."""
+
+# ==============================================================================
+# DATOS DE LA EMPRESA PARA FACTURACIÓN
+# ==============================================================================
+
+EMPRESA_RAZON_SOCIAL = config("EMPRESA_RAZON_SOCIAL", default="Mi Empresa")
+EMPRESA_RUC = config("EMPRESA_RUC", default="0000000-0")
+EMPRESA_TIMBRADO = config("EMPRESA_TIMBRADO", default="00000000")
+EMPRESA_TIMBRADO_VIGENCIA_INICIO = config("EMPRESA_TIMBRADO_VIGENCIA_INICIO", default="01/01/2025")
+EMPRESA_TIMBRADO_VIGENCIA_FIN = config("EMPRESA_TIMBRADO_VIGENCIA_FIN", default="31/12/2026")
+EMPRESA_DIRECCION = config("EMPRESA_DIRECCION", default="Dirección no configurada")
+EMPRESA_TELEFONO = config("EMPRESA_TELEFONO", default="(000) 000 000")
+EMPRESA_ACTIVIDAD = config("EMPRESA_ACTIVIDAD", default="Comercio electrónico")
