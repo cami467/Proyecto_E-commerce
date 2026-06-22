@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from django.db.models import Prefetch
 from django.http import HttpResponse
 from .factura import generar_factura_pdf
+from django.http import Http404
 
 from core.exceptions import CarritoVacio, StockInsuficiente, CuponInvalido
 from apps.cupones.models import Cupon
@@ -304,7 +305,13 @@ class OrdenViewSet(
         GET /api/ordenes/{id}/factura/
         Respuesta: application/pdf descargable.
         """
-        orden = self.get_object()
+        try:
+            orden = self.get_object()
+        except Http404:
+            return Response(
+            {"detail": "La orden no existe o no te pertenece."},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
         estados_facturables = ["confirmed", "processing", "shipped", "delivered"]
         if orden.estado not in estados_facturables:
