@@ -1,3 +1,111 @@
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
 
-# Create your tests here.
+Usuario = get_user_model()
+
+
+class UsuarioModelTestCase(TestCase):
+    """
+    Suite de pruebas QA para el modelo Usuario.
+
+    Cubre:
+        - Creacion de usuario con create_user (password hasheado).
+        - El email debe ser unico.
+        - nombre_completo se construye a partir de first_name/last_name.
+    """
+
+    def test_create_user_hashea_la_password(self):
+        """create_user() nunca guarda la password en texto plano."""
+        usuario = Usuario.objects.create_user(
+            username="hash_test",
+            email="hash_test@tienda.com",
+            password="Password123"
+        )
+        self.assertNotEqual(usuario.password, "Password123")
+        self.assertTrue(usuario.check_password("Password123"))
+
+    def test_email_duplicado_no_permitido(self):
+        """No se pueden crear dos usuarios con el mismo email."""
+        Usuario.objects.create_user(
+            username="usuario_uno",
+            email="duplicado@tienda.com",
+            password="Password123"
+        )
+        with self.assertRaises(Exception):
+            Usuario.objects.create_user(
+                username="usuario_dos",
+                email="duplicado@tienda.com",
+                password="Password123"
+            )
+
+    def test_nombre_completo_se_construye_correctamente(self):
+        """nombre_completo combina first_name y last_name."""
+        usuario = Usuario.objects.create_user(
+            username="nombre_test",
+            email="nombre_test@tienda.com",
+            password="Password123",
+            first_name="Camila",
+            last_name="Benitez"
+        )
+        self.assertEqual(usuario.nombre_completo, "Camila Benitez")
+
+
+class AutenticacionAPITestCase(APITestCase):
+    """
+    Suite de pruebas QA para los endpoints de autenticacion JWT.
+
+    Cubre:
+        - Registro exitoso de un nuevo usuario.
+        - Registro con email duplicado falla con 400.
+        - Login exitoso retorna access y refresh token.
+        - Login con password incorrecta falla con 401.
+        - Acceder a un endpoint protegido sin token falla con 401.
+        - Acceder a un endpoint protegido con token valido funciona.
+    """
+
+    def setUp(self):
+        self.usuario_existente = Usuario.objects.create_user(
+            username="usuario_login_test",
+            email="usuario_login_test@tienda.com",
+            password="Password123"
+        )
+
+    def test_login_exitoso_retorna_tokens(self):
+        """Login con credenciales correctas retorna access y refresh."""
+        response = self.client.post("/api/token/", {
+            "username": "usuario_login_test",
+            "password": "Password123",
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+
+    def test_login_con_password_incorrecta_falla(self):
+        """Login con password incorrecta retorna 401."""
+        response = self.client.post("/api/token/", {
+            "username": "usuario_login_test",
+            "password": "PasswordIncorrecta",
+        })
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_acceder_a_perfil_sin_token_falla(self):
+        """Acceder al perfil sin autenticacion retorna 401."""
+        response = self.client.get("/api/usuarios/perfil/")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_acceder_a_perfil_con_token_valido_funciona(self):
+        """Con un token valido, el endpoint de perfil retorna 200."""
+        login_response = self.client.post("/api/token/", {
+            "username": "usuario_login_test",
+            "password": "Password123",
+        })
+        access_token = login_response.data["access"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+        response = self.client.get("/api/usuarios/perfil/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["username"], "usuario_login_test")
