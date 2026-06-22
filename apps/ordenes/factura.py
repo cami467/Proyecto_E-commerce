@@ -1,228 +1,290 @@
 import os
-from reportlab.platypus import Image
-from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 
+import qrcode
 from django.conf import settings
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate,
     Table,
     TableStyle,
     Paragraph,
     Spacer,
+    Image,
 )
+
+from core.numeros_en_letras import numero_a_letras
+
+NEGRO = colors.black
+GRIS = colors.HexColor("#555555")
+GRIS_CLARO = colors.HexColor("#f4f4f4")
 
 
 def _gs(valor) -> str:
-    """
-    Formatea un valor monetario como string en Guaraníes.
-    Ejemplo: 135000 -> '135.000'
-    """
+    """Formatea un valor monetario en Guaraníes. Ej: 135000 -> '135.000'"""
     numero = int(Decimal(str(valor or 0)))
     return f"{numero:,}".replace(",", ".")
 
 
 def _numero_factura_display(orden) -> str:
-    """
-    Genera un número de factura con formato paraguayo estándar
-    001-001-NNNNNNN a partir de un contador secuencial.
-
-    Usa los últimos 7 dígitos numéricos derivados del número de
-    orden interno para mantener unicidad sin necesitar una tabla
-    de numeración fiscal separada (que se podría agregar a futuro
-    si el negocio crece y se gestiona ante la SET).
-    """
+    """Genera un número de factura con formato paraguayo estándar."""
     numero_secuencial = abs(hash(str(orden.id))) % 9_999_999
     return f"001-001-{numero_secuencial:07d}"
 
 
+def _generar_imagen_qr(orden) -> BytesIO:
+    """Genera un código QR en memoria que apunta al detalle de la orden."""
+    url_verificacion = f"{settings.URL_BASE_SISTEMA}/api/ordenes/{orden.id}/"
+
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=4,
+        border=1,
+    )
+    qr.add_data(url_verificacion)
+    qr.make(fit=True)
+    imagen_qr = qr.make_image(fill_color="black", back_color="white")
+
+    buffer_qr = BytesIO()
+    imagen_qr.save(buffer_qr, format="PNG")
+    buffer_qr.seek(0)
+    return buffer_qr
+
+
+# ==============================================================================
+# ESTILOS NATIVOS CONTROLADOS
+# ==============================================================================
+ESTILO_RAZON_SOCIAL = ParagraphStyle(
+    "RazonSocial", fontName="Helvetica-Bold", fontSize=13,
+    leading=15, textColor=NEGRO, alignment=TA_LEFT,
+)
+ESTILO_ACTIVIDAD = ParagraphStyle(
+    "Actividad", fontName="Helvetica", fontSize=7,
+    leading=9, textColor=NEGRO, alignment=TA_LEFT,
+)
+ESTILO_FACTURA_TITULO = ParagraphStyle(
+    "FacturaTitulo", fontName="Helvetica-Bold", fontSize=11,
+    leading=13, textColor=NEGRO, alignment=TA_CENTER,
+)
+ESTILO_FACTURA_DATO = ParagraphStyle(
+    "FacturaDato", fontName="Helvetica", fontSize=8,
+    leading=11, textColor=NEGRO, alignment=TA_CENTER,
+)
+ESTILO_CELDA = ParagraphStyle(
+    "Celda", fontName="Helvetica", fontSize=7.5,
+    leading=9, textColor=NEGRO, alignment=TA_LEFT,
+)
+ESTILO_CELDA_CENTRO = ParagraphStyle(
+    "CeldaCentro", fontName="Helvetica", fontSize=7.5,
+    leading=9, textColor=NEGRO, alignment=TA_CENTER,
+)
+ESTILO_CELDA_BOLD = ParagraphStyle(
+    "CeldaBold", fontName="Helvetica-Bold", fontSize=7.5,
+    leading=9, textColor=NEGRO, alignment=TA_LEFT,
+)
+ESTILO_CELDA_BOLD_CENTRO = ParagraphStyle(
+    "CeldaBoldCentro", fontName="Helvetica-Bold", fontSize=7,
+    leading=8.5, textColor=NEGRO, alignment=TA_CENTER, wordWrap=None,
+)
+ESTILO_CELDA_DER = ParagraphStyle(
+    "CeldaDer", fontName="Helvetica", fontSize=7.5,
+    leading=9, textColor=NEGRO, alignment=TA_RIGHT, wordWrap=None,
+)
+ESTILO_CELDA_BOLD_DER = ParagraphStyle(
+    "CeldaBoldDer", fontName="Helvetica-Bold", fontSize=7.5,
+    leading=9, textColor=NEGRO, alignment=TA_RIGHT, wordWrap=None,
+)
+ESTILO_NOTAS = ParagraphStyle(
+    "Notas", fontName="Helvetica", fontSize=8, textColor=NEGRO,
+)
+ESTILO_PIE = ParagraphStyle(
+    "Pie", fontName="Helvetica", fontSize=7, textColor=GRIS,
+)
+
+
 def generar_factura_pdf(orden) -> BytesIO:
     """
-    Genera el PDF de una factura legal paraguaya a partir de una
-    instancia de Orden, replicando el formato estándar de factura
-    impresa: encabezado con timbrado y RUC, datos del cliente,
-    tabla de ítems con columnas separadas por tasa de IVA (5%/10%/
-    Exentas), y liquidación del IVA al pie.
-
-    El PDF se genera completamente en memoria (BytesIO), nunca se
-    escribe a disco.
-
-    Args:
-        orden: instancia de Orden con sus items prefetcheados.
-               Se recomienda pasar una orden con
-               .prefetch_related("items") para evitar N+1.
-
-    Returns:
-        BytesIO: buffer del PDF listo para ser leído desde el inicio.
+    Genera el PDF de la factura unificando ítems y totales en una sola tabla
+    continua y cerrada, igual al formato digital de UniNorte.
     """
     buffer = BytesIO()
 
     documento = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        topMargin=1.5 * cm,
-        bottomMargin=1.5 * cm,
-        leftMargin=1.5 * cm,
-        rightMargin=1.5 * cm,
+        topMargin=0.8 * cm,
+        bottomMargin=0.8 * cm,
+        leftMargin=0.8 * cm,
+        rightMargin=0.8 * cm,
     )
 
-    estilos = getSampleStyleSheet()
-    estilo_empresa = ParagraphStyle(
-        "Empresa",
-        parent=estilos["Normal"],
-        fontSize=9,
-        leading=12,
-    )
-    estilo_factura_titulo = ParagraphStyle(
-        "FacturaTitulo",
-        parent=estilos["Normal"],
-        fontSize=13,
-        fontName="Helvetica-Bold",
-        alignment=1,  # centrado
-    )
-    estilo_factura_dato = ParagraphStyle(
-        "FacturaDato",
-        parent=estilos["Normal"],
-        fontSize=9,
-        alignment=1,
-    )
-    estilo_seccion = ParagraphStyle(
-        "Seccion",
-        parent=estilos["Normal"],
-        fontSize=9,
-        fontName="Helvetica-Bold",
-        spaceBefore=8,
-        spaceAfter=4,
-    )
+    ANCHO_PAGINA = 19.4 * cm
 
     elementos = []
-    
+    p = lambda txt: Paragraph(str(txt), ESTILO_CELDA)
+    pc = lambda txt: Paragraph(str(txt), ESTILO_CELDA_CENTRO)
+    pb = lambda txt: Paragraph(str(txt), ESTILO_CELDA_BOLD)
+    pbc = lambda txt: Paragraph(str(txt), ESTILO_CELDA_BOLD_CENTRO)
+    pd = lambda txt: Paragraph(str(txt), ESTILO_CELDA_DER)
+    pbd = lambda txt: Paragraph(str(txt), ESTILO_CELDA_BOLD_DER)
+
     # ------------------------------------------------------------------
-    # LOGOS DE LA EMPRESA
+    # ENCABEZADO FISCAL Y LOGOS
     # ------------------------------------------------------------------
-    def _cargar_logo(nombre_archivo, ancho=1.0 * cm, alto=1.4 * cm):
-        """
-        Carga un logo desde static/facturas/ como imagen de ReportLab.
-        Si el archivo no existe, retorna None en lugar de fallar,
-        para que la factura siga generándose aunque falte un logo.
-        """
+    def _cargar_logo(nombre_archivo, ancho=1.1 * cm, alto=1.1 * cm):
         ruta = os.path.join(settings.BASE_DIR, "static", "facturas", nombre_archivo)
         if not os.path.exists(ruta):
             return None
         return Image(ruta, width=ancho, height=alto)
 
-    logo_eimek = _cargar_logo("logo_eimek.jpg")
-    logo_ecp = _cargar_logo("ecp.jpg")
-    logo_good = _cargar_logo("good_of_pizz.jpg")
+    logos = [
+        logo for logo in (
+            _cargar_logo("logo_eimek.jpg"),
+            _cargar_logo("ecp.jpg"),
+            _cargar_logo("good_of_pizz.jpg"),
+        ) if logo is not None
+    ]
 
-    logos_disponibles = [logo for logo in (logo_eimek, logo_ecp, logo_good) if logo is not None]
+    ANCHO_MARCA = 12.0 * cm
+    ANCHO_FISCAL = ANCHO_PAGINA - ANCHO_MARCA
 
-    if logos_disponibles:
-        fila_logos = Table(
-            [logos_disponibles],
-            colWidths=[1.1 * cm] * len(logos_disponibles),
-        )
+    if logos:
+        fila_logos = Table([logos], colWidths=[1.2 * cm] * len(logos))
         fila_logos.setStyle(TableStyle([
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING", (1, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ]))
+        ancho_logos = 1.2 * cm * len(logos) + 0.1 * cm
     else:
-        fila_logos = Paragraph("", estilos["Normal"])
+        fila_logos = Paragraph("", ESTILO_CELDA)
+        ancho_logos = 0.1 * cm
 
-    # ------------------------------------------------------------------
-    # ENCABEZADO: DATOS DE LA EMPRESA + RECUADRO DE FACTURA
-    # ------------------------------------------------------------------
-    datos_empresa = Paragraph(
-        f"<b>{settings.EMPRESA_RAZON_SOCIAL}</b><br/>"
-        f"{settings.EMPRESA_ACTIVIDAD}<br/>"
-        f"{settings.EMPRESA_DIRECCION}<br/>"
-        f"Tel: {settings.EMPRESA_TELEFONO}",
-        estilo_empresa,
+    bloque_marca = Table(
+        [[
+            fila_logos,
+            Table(
+                [
+                    [Paragraph(settings.EMPRESA_RAZON_SOCIAL, ESTILO_RAZON_SOCIAL)],
+                    [Paragraph(settings.EMPRESA_ACTIVIDAD, ESTILO_ACTIVIDAD)],
+                ],
+                colWidths=[ANCHO_MARCA - ancho_logos],
+            ),
+        ]],
+        colWidths=[ancho_logos, ANCHO_MARCA - ancho_logos],
     )
-    
-    bloque_empresa = Table(
-        [[fila_logos, datos_empresa]],
-        colWidths=[3.6 * cm if logos_disponibles else 0.1 * cm, 6.8 * cm],
-    )
-    bloque_empresa.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    bloque_marca.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
 
     numero_factura = _numero_factura_display(orden)
-    recuadro_factura = Table(
+    bloque_fiscal = Table(
         [
-            [Paragraph("FACTURA", estilo_factura_titulo)],
-            [Paragraph(f"N° {numero_factura}", estilo_factura_dato)],
-            [Paragraph(f"TIMBRADO N°: {settings.EMPRESA_TIMBRADO}", estilo_factura_dato)],
-            [Paragraph(f"R.U.C.: {settings.EMPRESA_RUC}", estilo_factura_dato)],
+            [Paragraph("FACTURA ELECTRÓNICA", ESTILO_FACTURA_TITULO)],
+            [Paragraph(f"N° {numero_factura}", ESTILO_FACTURA_DATO)],
+            [Paragraph(f"Timbrado N°: {settings.EMPRESA_TIMBRADO}", ESTILO_FACTURA_DATO)],
+            [Paragraph(f"R.U.C.: {settings.EMPRESA_RUC}", ESTILO_FACTURA_DATO)],
             [Paragraph(
                 f"Vigencia: {settings.EMPRESA_TIMBRADO_VIGENCIA_INICIO} - "
                 f"{settings.EMPRESA_TIMBRADO_VIGENCIA_FIN}",
-                estilo_factura_dato,
+                ESTILO_FACTURA_DATO,
             )],
         ],
-        colWidths=[7 * cm],
+        colWidths=[ANCHO_FISCAL],
     )
-    recuadro_factura.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 1.2, colors.black),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
+    bloque_fiscal.setStyle(TableStyle([
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+
+    texto_pie_marca = Paragraph(
+        f"{settings.EMPRESA_DIRECCION}  -  Tel: {settings.EMPRESA_TELEFONO}",
+        ESTILO_ACTIVIDAD,
+    )
+
+    bloque_marca_completo = Table(
+        [[bloque_marca], [texto_pie_marca]],
+        colWidths=[ANCHO_MARCA],
+    )
+    bloque_marca_completo.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
 
     tabla_encabezado = Table(
-        [[bloque_empresa, recuadro_factura]],
-        colWidths=[10.5 * cm, 7 * cm],
+        [[bloque_marca_completo, bloque_fiscal]],
+        colWidths=[ANCHO_MARCA, ANCHO_FISCAL],
     )
     tabla_encabezado.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, NEGRO),
+        ("LINEAFTER", (0, 0), (0, 0), 0.8, NEGRO),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
     ]))
     elementos.append(tabla_encabezado)
-    elementos.append(Spacer(1, 0.5 * cm))
+    elementos.append(Spacer(1, 0.25 * cm))
 
     # ------------------------------------------------------------------
     # DATOS DEL CLIENTE
     # ------------------------------------------------------------------
     fecha_emision = orden.fecha_creacion.strftime("%d/%m/%Y")
+    hora_emision = orden.fecha_creacion.strftime("%H:%M:%S")
     nombre_cliente = orden.usuario.get_full_name() or orden.usuario.username
-    condicion_venta = "CONTADO"  # El proyecto solo maneja ventas al contado por ahora
+    correo_cliente = str(orden.usuario.email or "-")
 
-    datos_cliente = [
-        ["Fecha de emisión:", fecha_emision, "Condición de venta:", condicion_venta],
-        ["Nombre o Razón Social:", nombre_cliente, "RUC o C.I. N°:", "-"],
-        ["Dirección:", "-", "Teléfono:", "-"],
+    filas_grilla = [
+        [pb("Fecha y hora de emisión:"), p(f"{fecha_emision} {hora_emision}"), pb("Moneda:"), p("GUARANÍ")],
+        [pb("N° de Orden / Ref:"), p(orden.numero_orden_display), pb("Condición Venta:"), p("Contado  ( X )   Crédito  (   )")],
+        [pb("Nombre o Razón Social:"), p(nombre_cliente), pb("Teléfono:"), p("-")],
+        [pb("Correo Electrónico:"), p(correo_cliente), pb("RUC / C.I. N°:"), p("-")],
     ]
-    tabla_cliente = Table(
-        datos_cliente,
-        colWidths=[4.2 * cm, 6.3 * cm, 3.8 * cm, 3.2 * cm],
+
+    tabla_grilla = Table(
+        filas_grilla,
+        colWidths=[3.6 * cm, ANCHO_PAGINA - 3.6 * cm - 3.2 * cm - 5.3 * cm, 3.2 * cm, 5.3 * cm],
     )
-    tabla_cliente.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-        ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    tabla_grilla.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, NEGRO),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, NEGRO),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
     ]))
-    elementos.append(tabla_cliente)
-    elementos.append(Spacer(1, 0.4 * cm))
+    elementos.append(tabla_grilla)
+    elementos.append(Spacer(1, 0.3 * cm))
 
     # ------------------------------------------------------------------
-    # TABLA DE ÍTEMS — separados por tasa de IVA (5% / 10% / Exentas)
+    # ESTRUCTURA DE ÍTEMS Y TOTALES UNIFICADA (UN SOLO CUADRO CONTINUO)
     # ------------------------------------------------------------------
-    encabezado_items = [
-        "Cant.", "Descripción", "Precio Unitario",
-        "Exentas", "5%", "10%",
+    COL_COD = 1.4 * cm
+    COL_DESC = 6.4 * cm
+    COL_UNI = 1.1 * cm
+    COL_CANT = 1.1 * cm
+    COL_PRECIO = 2.3 * cm
+    COL_DESC_MONTO = 2.0 * cm
+    COL_IVA = (ANCHO_PAGINA - COL_COD - COL_DESC - COL_UNI - COL_CANT - COL_PRECIO - COL_DESC_MONTO) / 3
+
+    ANCHOS_ITEMS = [COL_COD, COL_DESC, COL_UNI, COL_CANT, COL_PRECIO, COL_DESC_MONTO, COL_IVA, COL_IVA, COL_IVA]
+
+    filas_items = [
+        [pc(""), pc(""), pc(""), pc(""), pc(""), pc(""), pbc("Valor de Venta"), pbc(""), pbc("")],
+        [pbc("Cód."), pbc("Descripción"), pbc("Unid."), pbc("Cant."), pbc("Precio Unit."), pbc("Descuento"), pbc("Exentas"), pbc("5%"), pbc("10%")]
     ]
-    filas_items = [encabezado_items]
 
     total_exentas = Decimal("0")
     total_cinco = Decimal("0")
@@ -230,97 +292,186 @@ def generar_factura_pdf(orden) -> BytesIO:
     iva_cinco = Decimal("0")
     iva_diez = Decimal("0")
 
-    for item in orden.items.all():
-        fila = [str(item.cantidad), f"{item.nombre_producto} - {item.nombre_variante}", _gs(item.precio_unitario)]
+    items_orden = list(orden.items.all())
+
+    for idx, item in enumerate(items_orden, start=1):
+        descripcion = f"{item.nombre_producto} - {item.nombre_variante}"
+        desc_display = _gs(orden.monto_descuento / len(items_orden)) if orden.monto_descuento else "0"
+
+        fila = [pc(idx), p(descripcion), pc("UNI"), pc(item.cantidad), pd(_gs(item.precio_unitario)), pd(desc_display)]
 
         if item.tasa_iva == "0":
             total_exentas += item.subtotal
-            fila += [_gs(item.subtotal), "", ""]
+            fila += [pd(_gs(item.subtotal)), pd(""), pd("")]
         elif item.tasa_iva == "5":
             total_cinco += item.subtotal
             iva_cinco += item.monto_iva
-            fila += ["", _gs(item.subtotal), ""]
-        else:  # 10%
+            fila += [pd(""), pd(_gs(item.subtotal)), pd("")]
+        else:
             total_diez += item.subtotal
             iva_diez += item.monto_iva
-            fila += ["", "", _gs(item.subtotal)]
-
+            fila += [pd(""), pd(""), pd(_gs(item.subtotal))]
         filas_items.append(fila)
 
-    # Rellena filas vacías hasta un mínimo de 8, como en la factura impresa
-    while len(filas_items) < 9:
-        filas_items.append(["", "", "", "", "", ""])
+    # Relleno de filas visibles vacías (espacio "aireado" como UniNorte)
+    fila_inicio_blancos = len(filas_items)
+    MINIMO_FILAS_VISIBLES = 6
+    while len(filas_items) - 2 < MINIMO_FILAS_VISIBLES:
+        filas_items.append([p(""), p(""), p(""), p(""), p(""), p(""), p(""), p(""), p("")])
 
-    tabla_items = Table(
-        filas_items,
-        colWidths=[1.3 * cm, 7.2 * cm, 2.8 * cm, 2.2 * cm, 1.8 * cm, 2.2 * cm],
-        repeatRows=1,
-    )
-    tabla_items.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c2c2c")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (0, 0), (0, -1), "CENTER"),
-        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-        ("BOX", (0, 0), (-1, -1), 1, colors.black),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    elementos.append(tabla_items)
-    elementos.append(Spacer(1, 0.4 * cm))
+    fila_fin_items_idx = len(filas_items) - 1
 
-    # ------------------------------------------------------------------
-    # LIQUIDACIÓN DEL IVA Y TOTALES
-    # ------------------------------------------------------------------
-    iva_total = iva_cinco + iva_diez
+    # Cálculo final
     valor_venta_total = total_exentas + total_cinco + total_diez
+    iva_total = iva_cinco + iva_diez
 
-    filas_liquidacion = [
-        ["Subtotales:", _gs(valor_venta_total)],
-        ["Total a pagar en Guaraníes:", _gs(orden.total)],
-        ["", ""],
-        ["Liquidación del IVA", ""],
-        ["(5%) Gravado:", _gs(total_cinco)],
-        ["(10%) Gravado:", _gs(total_diez)],
-        ["Exentas:", _gs(total_exentas)],
-        ["IVA (5%):", _gs(iva_cinco)],
-        ["IVA (10%):", _gs(iva_diez)],
-        ["Total IVA:", _gs(iva_total)],
-    ]
+    # Fila Subtotal
+    filas_items.append([
+        pb("SUBTOTAL:"), pb(""), pb(""), pb(""), pb(""), pb(""),
+        pbd(_gs(total_exentas)), pbd(_gs(total_cinco)), pbd(_gs(total_diez)),
+    ])
+    fila_subtotal_idx = len(filas_items) - 1
 
-    tabla_liquidacion = Table(filas_liquidacion, colWidths=[12 * cm, 5.5 * cm])
-    tabla_liquidacion.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 1), (-1, 1), 11),
-        ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"),
-        ("LINEABOVE", (0, 1), (-1, 1), 1, colors.black),
-        ("LINEBELOW", (0, 1), (-1, 1), 1, colors.black),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black),
+    # Fila Total de la Operación
+    monto_operacion_en_letras = numero_a_letras(valor_venta_total)
+    filas_items.append([
+        pb(f"TOTAL DE LA OPERACIÓN: GUARANÍES {monto_operacion_en_letras} ==="),
+        pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pbd(_gs(valor_venta_total)),
+    ])
+    fila_total_op_idx = len(filas_items) - 1
+
+    indices_spans_totales = []
+
+    cupon_texto = f" ({orden.codigo_cupon})" if (orden.monto_descuento and orden.codigo_cupon) else ""
+    if orden.monto_descuento and orden.monto_descuento > 0:
+        filas_items.append([
+            pb(f"DESCUENTO COMPUESTO{cupon_texto}:"), pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pb(""),
+            pbd(f"- {_gs(orden.monto_descuento)}"),
+        ])
+        indices_spans_totales.append(len(filas_items) - 1)
+
+    if orden.costo_envio and orden.costo_envio > 0:
+        filas_items.append([
+            pb("COSTO DE SERVICIO / ENVÍO:"), pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pbd(_gs(orden.costo_envio)),
+        ])
+        indices_spans_totales.append(len(filas_items) - 1)
+
+    # Fila Total a Pagar
+    # Fila Total a Pagar — incluye el monto en letras del TOTAL
+    # FINAL (orden.total), que es el numero que realmente se muestra
+    # a la derecha de esta fila.
+    monto_pagar_en_letras = numero_a_letras(orden.total)
+    filas_items.append([
+        pb(f"TOTAL A PAGAR EN GUARANÍES: {monto_pagar_en_letras} ==="),
+        pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pb(""), pbd(_gs(orden.total)),
+    ])
+    fila_total_pagar_idx = len(filas_items) - 1
+    indices_spans_totales.append(fila_total_pagar_idx)
+
+    # Fila Liquidación IVA
+    filas_items.append([
+        pb("LIQUIDACIÓN DEL IVA:"), pb(""), pb(""),
+        pc("5%:"), pd(_gs(iva_cinco)),
+        pc("10%:"), pd(_gs(iva_diez)),
+        pb("TOTAL IVA:"), pbd(_gs(iva_total)),
+    ])
+    fila_iva_idx = len(filas_items) - 1
+
+    # Construcción de la tabla completa
+    tabla_items = Table(filas_items, colWidths=ANCHOS_ITEMS, repeatRows=2)
+
+    estilo_tabla = [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    elementos.append(tabla_liquidacion)
+
+        # Aire visual en las filas vacías, como en UniNorte
+        ("TOPPADDING", (0, fila_inicio_blancos), (-1, fila_fin_items_idx), 14),
+        ("BOTTOMPADDING", (0, fila_inicio_blancos), (-1, fila_fin_items_idx), 14),
+
+        # 1. El cuadro exterior unificado de principio a fin sin cortes
+        ("BOX", (0, 0), (-1, -1), 0.8, NEGRO),
+
+        # 2. Cabecera agrupada "Valor de Venta"
+        ("SPAN", (6, 0), (8, 0)),
+        ("LINEBELOW", (0, 0), (-1, 1), 0.8, NEGRO),
+
+        # 3. Líneas divisorias verticales para el cuerpo de ítems y las columnas
+        ("LINEAFTER", (0, 1), (-2, fila_fin_items_idx), 0.5, NEGRO),
+        ("LINEBELOW", (0, 1), (-1, fila_inicio_blancos - 1), 0.5, NEGRO),
+
+        # 4. Línea firme horizontal que divide el fin de los ítems del inicio de los totales
+        ("LINEBELOW", (0, fila_fin_items_idx), (-1, fila_fin_items_idx), 0.8, NEGRO),
+
+        # 5. SPANs horizontales de totales fiscales
+        ("SPAN", (0, fila_subtotal_idx), (5, fila_subtotal_idx)),
+        ("LINEBELOW", (0, fila_subtotal_idx), (-1, fila_subtotal_idx), 0.5, NEGRO),
+
+        ("SPAN", (0, fila_total_op_idx), (7, fila_total_op_idx)),
+        ("LINEBELOW", (0, fila_total_op_idx), (-1, fila_total_op_idx), 0.5, NEGRO),
+    ]
+
+    for idx in indices_spans_totales:
+        estilo_tabla.append(("SPAN", (0, idx), (7, idx)))
+        estilo_tabla.append(("LINEBELOW", (0, idx), (-1, idx), 0.5, NEGRO))
+
+    estilo_tabla.extend([
+        ("SPAN", (0, fila_iva_idx), (2, fila_iva_idx)),
+        ("LINEAFTER", (2, fila_iva_idx), (2, fila_iva_idx), 0.5, NEGRO),
+        ("LINEAFTER", (4, fila_iva_idx), (4, fila_iva_idx), 0.5, NEGRO),
+        ("LINEAFTER", (6, fila_iva_idx), (6, fila_iva_idx), 0.5, NEGRO),
+        ("LINEAFTER", (7, fila_iva_idx), (7, fila_iva_idx), 0.5, NEGRO),
+    ])
+
+    tabla_items.setStyle(TableStyle(estilo_tabla))
+    elementos.append(tabla_items)
+    elementos.append(Spacer(1, 0.3 * cm))
 
     # ------------------------------------------------------------------
-    # NOTAS Y PIE
+    # BLOQUE FINAL DE CONTROL Y VALIDACIÓN SIFEN
     # ------------------------------------------------------------------
-    if orden.notas:
-        elementos.append(Spacer(1, 0.5 * cm))
-        elementos.append(Paragraph("Notas:", estilo_seccion))
-        elementos.append(Paragraph(orden.notas, estilos["Normal"]))
+    buffer_qr = _generar_imagen_qr(orden)
+    imagen_qr = Image(buffer_qr, width=2.1 * cm, height=2.1 * cm)
 
-    elementos.append(Spacer(1, 0.8 * cm))
-    elementos.append(
-        Paragraph(
-            "Original: Cliente - Duplicado: Archivo Tributario",
-            ParagraphStyle("Pie", parent=estilos["Normal"], fontSize=7.5, textColor=colors.grey),
-        )
+    texto_qr = Paragraph(
+        "Consulte la validez de esta Factura Electrónica con el código QR implantado a la izquierda, "
+        "o ingresando el identificador único o CDC de la orden dentro del portal SIFEN de la SET.<br/>"
+        "<b>ESTE DOCUMENTO ES UNA REPRESENTACIÓN GRÁFICA DE UN DOCUMENTO ELECTRÓNICO (XML)</b>",
+        ESTILO_PIE,
     )
+
+    filas_bloque_final = [[imagen_qr, texto_qr]]
+    if orden.notas:
+        filas_bloque_final.append([
+            "",
+            Paragraph(f"<b>Información de interés del emisor:</b> {orden.notas}", ESTILO_NOTAS),
+        ])
+    filas_bloque_final.append([
+        "",
+        Paragraph(
+            "Si su documento presenta algún error u omisión comercial, podrá solicitar la modificación o "
+            "anulación correspondiente dentro de los plazos estipulados por la normativa tributaria vigente. "
+            "Original: Cliente - Duplicado: Archivo Tributario Contable.",
+            ESTILO_PIE,
+        ),
+    ])
+
+    ANCHO_QR_COL = 2.5 * cm
+    tabla_bloque_final = Table(
+        filas_bloque_final,
+        colWidths=[ANCHO_QR_COL, ANCHO_PAGINA - ANCHO_QR_COL],
+    )
+
+    estilo_bloque_final = [
+        ("BOX", (0, 0), (-1, -1), 0.8, NEGRO),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("SPAN", (0, 0), (0, len(filas_bloque_final) - 1)),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+    ]
+    tabla_bloque_final.setStyle(TableStyle(estilo_bloque_final))
+    elementos.append(tabla_bloque_final)
 
     documento.build(elementos)
     buffer.seek(0)
