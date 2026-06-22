@@ -24,15 +24,28 @@ CENTENAS = [
     "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS",
 ]
 
+VEINTITANTOS = {
+    21: "VEINTIUNO", 22: "VEINTIDOS", 23: "VEINTITRES",
+    24: "VEINTICUATRO", 25: "VEINTICINCO", 26: "VEINTISEIS",
+    27: "VEINTISIETE", 28: "VEINTIOCHO", 29: "VEINTINUEVE",
+}
 
 def _convertir_decenas(numero: int) -> str:
-    """Convierte un numero de 0 a 99 a letras."""
-    if numero <= 20:
-        return DECENAS_ESPECIALES.get(numero, UNIDADES[numero])
+    """
+    Convierte un numero de 0 a 99 a letras.
+
+    """
+    if numero in DECENAS_ESPECIALES:
+        return DECENAS_ESPECIALES[numero]
+    if numero in VEINTITANTOS:
+        return VEINTITANTOS[numero]
+    if numero < 10:
+        return UNIDADES[numero]
     decena, unidad = divmod(numero, 10)
     if unidad == 0:
         return DECENAS[decena]
-    return f"{DECENAS[decena]} Y {UNIDADES[unidad]}"
+    texto_unidad = "UNO" if unidad == 1 else UNIDADES[unidad]
+    return f"{DECENAS[decena]} Y {texto_unidad}"
 
 
 def _convertir_centenas(numero: int) -> str:
@@ -66,6 +79,15 @@ def numero_a_letras(numero: int) -> str:
 
     Pensado para montos en Guaranies, que no tienen decimales.
 
+    Regla gramatical "UN" vs "UNO":
+        "UN" se usa correctamente solo cuando precede a un
+        sustantivo (UN MIL, UN MILLON). Si el numero completo
+        termina exactamente en la palabra "UN" sin nada despues
+        (ej: 1, 21, 31, 101), la palabra correcta es "UNO". Por
+        eso se aplica un ajuste final sobre el resultado completo
+        en lugar de tratar de resolverlo en cada sub-funcion, ya
+        que "UN" dentro de "UN MIL" o "UN MILLON" no debe tocarse.
+
     Args:
         numero: monto entero a convertir.
 
@@ -89,4 +111,14 @@ def numero_a_letras(numero: int) -> str:
     if resto_millones:
         partes.append(_convertir_miles(resto_millones))
 
-    return " ".join(partes).strip()
+    resultado = " ".join(partes).strip()
+
+    # Ajuste final: si el resultado termina en la palabra "UN" sola
+    # (no seguida de MIL/MILLON, que ya se generan correctos arriba),
+    # se corrige a "UNO". Cubre los casos 1, 21, 31, 101, etc.
+    if resultado.endswith(" UN"):
+        resultado = resultado[: -len("UN")] + "UNO"
+    elif resultado == "UN":
+        resultado = "UNO"
+
+    return resultado
