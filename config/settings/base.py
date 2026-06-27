@@ -6,7 +6,7 @@ from datetime import timedelta
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Clave secreta para firmar cookies, sesiones y tokens
-SECRET_KEY = config("SECRET_KEY", default="clave temporal cambiar mas adelante")
+SECRET_KEY = config("SECRET_KEY")
 
 # Modo debug (solo debe estar en True en desarrollo)
 DEBUG = False
