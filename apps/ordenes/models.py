@@ -155,14 +155,15 @@ class Orden(ModeloBase):
                 usuario_accion,
                 comentario or "Orden cancelada."
             )
-            
-        # Notificar al usuario de forma asincrona 
-        from apps.notificaciones.tasks import notificar_orden_cancelada
-        notificar_orden_cancelada.delay(
-            usuario_id=self.usuario.pk,
-            orden_id=str(self.id),
-            numero_orden=self.numero_orden_display,
-        )
+
+            from apps.notificaciones.tasks import notificar_orden_cancelada
+            transaction.on_commit(
+                lambda: notificar_orden_cancelada.delay(
+                    usuario_id=self.usuario.pk,
+                    orden_id=str(self.id),
+                    numero_orden=self.numero_orden_display,
+                )
+            )
 
     @classmethod
     def crear_desde_carrito(
@@ -256,15 +257,16 @@ class Orden(ModeloBase):
             # Limpiar el carrito
             carrito.items.all().delete()
             
-             # Notificar al usuario de forma asincrona 
             from apps.notificaciones.tasks import notificar_orden_confirmada
-            notificar_orden_confirmada.delay(
-                usuario_id=orden.usuario.pk,
-                orden_id=str(orden.id),
-                numero_orden=orden.numero_orden_display,
-                total=orden.total,
+            transaction.on_commit(
+                lambda: notificar_orden_confirmada.delay(
+                    usuario_id=orden.usuario.pk,
+                    orden_id=str(orden.id),
+                    numero_orden=orden.numero_orden_display,
+                    total=orden.total,
+                )
             )
-            return orden
+        return orden
 
 
 class ItemOrden(ModeloBase):
