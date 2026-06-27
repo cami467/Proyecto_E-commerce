@@ -1,4 +1,5 @@
 import os
+import hashlib
 from decimal import Decimal
 from io import BytesIO
 
@@ -32,8 +33,13 @@ def _gs(valor) -> str:
 
 
 def _numero_factura_display(orden) -> str:
-    """Genera un número de factura con formato paraguayo estándar."""
-    numero_secuencial = abs(hash(str(orden.id))) % 9_999_999
+    """
+    Genera un número de factura con formato paraguayo estándar
+    001-001-NNNNNNN a partir de un hash determinístico del UUID
+    de la orden.
+    """
+    hash_bytes = hashlib.sha256(str(orden.id).encode()).hexdigest()
+    numero_secuencial = int(hash_bytes, 16) % 9_999_999
     return f"001-001-{numero_secuencial:07d}"
 
 
