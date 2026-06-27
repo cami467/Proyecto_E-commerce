@@ -300,12 +300,32 @@ def generar_factura_pdf(orden) -> BytesIO:
 
     items_orden = list(orden.items.all())
 
-    for idx, item in enumerate(items_orden, start=1):
+    # Prorratea el descuento total proporcionalmente al subtotal de
+    # cada item, no en partes iguales. Dividir 100.000 Gs en 3 items
+    # iguales daria 33.333 x 3 = 99.999 (no cierra). El prorrateo
+    # proporcional respeta el peso real de cada item en la compra,
+    # y el ultimo item se ajusta para que la suma sea exacta.
+    descuentos_por_item = []
+    if orden.monto_descuento and orden.monto_descuento > 0:
+        subtotal_general = sum(item.subtotal for item in items_orden)
+        descuento_acumulado = Decimal("0")
+        for i, item in enumerate(items_orden):
+            if i == len(items_orden) - 1:
+                # Ultimo item: se ajusta para que la suma cierre exacto
+                descuento_item = orden.monto_descuento - descuento_acumulado
+            else:
+                proporcion = item.subtotal / subtotal_general
+                descuento_item = (orden.monto_descuento * proporcion).quantize(Decimal("1"))
+            descuentos_por_item.append(descuento_item)
+            descuento_acumulado += descuento_item
+    else:
+        descuentos_por_item = [Decimal("0")] * len(items_orden)
+
+    for idx, (item, descuento_item) in enumerate(zip(items_orden, descuentos_por_item), start=1):
         descripcion = f"{item.nombre_producto} - {item.nombre_variante}"
-        desc_display = _gs(orden.monto_descuento / len(items_orden)) if orden.monto_descuento else "0"
+        desc_display = _gs(descuento_item)
 
         fila = [pc(idx), p(descripcion), pc("UNI"), pc(item.cantidad), pd(_gs(item.precio_unitario)), pd(desc_display)]
-
         if item.tasa_iva == "0":
             total_exentas += item.subtotal
             fila += [pd(_gs(item.subtotal)), pd(""), pd("")]
