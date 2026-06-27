@@ -1,5 +1,7 @@
 from decimal import Decimal
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -53,8 +55,6 @@ class CuponViewSet(
     lookup_field = "codigo"
 
     def get_queryset(self):
-        from django.utils import timezone
-        from django.db.models import Q
         """
         Usuarios normales ven solo cupones vigentes y activos.
         Admins ven todos los cupones sin filtro.
@@ -64,12 +64,12 @@ class CuponViewSet(
 
         ahora = timezone.now()
         return Cupon.objects.filter(
-            esta_activo=True,
-            fecha_inicio__lte=ahora,
-        ).filter(
-            Q(fecha_vencimiento__isnull=True) |
-            Q(fecha_vencimiento__gte=ahora)
-        )
+        esta_activo=True,
+        fecha_inicio__lte=ahora,
+    ).filter(
+        Q(fecha_vencimiento__isnull=True) |
+        Q(fecha_vencimiento__gte=ahora)
+    )
 
     def get_serializer_class(self):
         if self.action == "list":
