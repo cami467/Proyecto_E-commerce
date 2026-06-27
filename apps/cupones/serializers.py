@@ -147,23 +147,20 @@ class CuponAplicadoSerializer(serializers.Serializer):
     tipo = serializers.CharField()
     tipo_display = serializers.CharField()
     valor = serializers.DecimalField(max_digits=12, decimal_places=2)
-    
-    # Configuramos decimal_places=0 para que maneje el dinero como enteros de Guaraníes
+
+    # decimal_places=0 porque el dinero se maneja como enteros de Guaraníes
     subtotal_original = serializers.DecimalField(max_digits=12, decimal_places=0, coerce_to_string=False)
     monto_descuento = serializers.DecimalField(max_digits=12, decimal_places=0, coerce_to_string=False)
     total_con_descuento = serializers.DecimalField(max_digits=12, decimal_places=0, coerce_to_string=False)
     mensaje = serializers.CharField()
-    
-    def to_representation(self, instance):
+
+    def to_representation(self, instance: dict) -> dict:
+        """
+        Si el cupón es de monto fijo, muestra 'valor' como entero
+        sin decimales (ej: 50000 en lugar de 50000.00), porque
+        representa Guaraníes, no un porcentaje.
+        """
         data = super().to_representation(instance)
-        
-        # Obtenemos el tipo de forma segura, funcione con diccionarios u objetos
-        tipo = instance.get("tipo") if isinstance(instance, dict) else getattr(instance, "tipo", None)
-        
-        # Si el cupón es de monto fijo, removemos las comillas y decimales del campo 'valor'
-        if tipo == "monto_fijo":
-            # Usamos el valor original numérico para evitar problemas de casteo de strings
-            valor_original = instance.get("valor") if isinstance(instance, dict) else getattr(instance, "valor", 0)
-            data["valor"] = int(valor_original)
-            
+        if instance.get("tipo") == "monto_fijo":
+            data["valor"] = int(instance.get("valor", 0))
         return data
