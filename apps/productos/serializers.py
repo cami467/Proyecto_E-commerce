@@ -4,7 +4,6 @@ from rest_framework import serializers
 from rest_framework import serializers as drf_serializers
 from drf_spectacular.utils import extend_schema_field
 from .models import Categoria, Producto, Variante, ImagenProducto
-from apps.productos.models import Categoria
 from rest_framework.validators import UniqueTogetherValidator
 
 
