@@ -152,14 +152,21 @@ class Pago(ModeloBase):
 
         with transaction.atomic():
             self._actualizar_estado(
-                self.Estado.APPROVED,
-                campos_extra={
-                    "id_transaccion": id_transaccion,
-                    "respuesta_pasarela": respuesta or {},
-                }
+            self.Estado.APPROVED,
+            campos_extra={
+                "id_transaccion": id_transaccion,
+                "respuesta_pasarela": respuesta or {},
+            }
+        )
+
+        from apps.notificaciones.tasks import notificar_pago_aprobado
+        transaction.on_commit(
+            lambda: notificar_pago_aprobado.delay(
+                usuario_id=self.orden.usuario.pk,
+                pago_id=str(self.id),
+                monto=self.monto,
             )
-            # TODO: Notificar a la orden cuando se implemente
-            # self.orden.marcar_como_pagada()
+        )
 
     def marcar_rechazado(self, respuesta=None):
         """
@@ -167,6 +174,9 @@ class Pago(ModeloBase):
 
         Solo puede rechazarse un pago pendiente.
         Si ya fue procesado (aprobado/rechazado) no hace nada.
+
+        La notificacion se programa con transaction.on_commit() por la
+        misma razon explicada en marcar_aprobado().
         """
         if self.estado != self.Estado.PENDING:
             return
@@ -176,8 +186,16 @@ class Pago(ModeloBase):
                 self.Estado.REJECTED,
                 campos_extra={
                     "respuesta_pasarela": respuesta or {},
-                }
+            }
+        )
+
+        from apps.notificaciones.tasks import notificar_pago_rechazado
+        transaction.on_commit(
+            lambda: notificar_pago_rechazado.delay(
+                usuario_id=self.orden.usuario.pk,
+                pago_id=str(self.id),
             )
+        )
 
     def marcar_reembolsado(self, respuesta=None):
         """
