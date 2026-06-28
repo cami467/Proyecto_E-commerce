@@ -152,6 +152,27 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "API REST para sistema de e-commerce",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "ENUM_NAME_OVERRIDES": {
+        # Un solo nombre para el set de estados de Orden
+        # (cubre Orden.estado, HistorialEstadoOrden.estado_anterior y estado_nuevo)
+        "EstadoOrdenEnum": "apps.ordenes.models.Orden.Estado",
+
+        # Set distinto: estados de Pago
+        "EstadoPagoEnum": "apps.pagos.models.Pago.Estado",
+
+        # Pasarela de pago
+        "PasarelaEnum": "apps.pagos.models.Pago.Pasarela",
+
+        # Tipo de descuento del Cupón
+        "TipoCuponEnum": "apps.cupones.models.Cupon.TipoDescuento",
+
+        # Tipo de Notificación
+        "TipoNotificacionEnum": "apps.notificaciones.models.Notificacion.Tipo",
+
+        # Tasa de IVA del Producto
+        "TasaIVAEnum": "apps.productos.models.Producto.TasaIVA",
+    },
+    "ENUM_GENERATE_CHOICE_DESCRIPTION": False,
 }
 
 # Configuración de JWT (tokens)

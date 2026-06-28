@@ -1,3 +1,5 @@
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -10,7 +12,9 @@ from .serializers import NotificacionSerializer, NotificacionListSerializer
 # ==============================================================================
 # VIEWSET DE NOTIFICACIONES
 # ==============================================================================
-
+@extend_schema(parameters=[
+    OpenApiParameter("id", OpenApiTypes.UUID, OpenApiParameter.PATH)
+])
 class NotificacionViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,

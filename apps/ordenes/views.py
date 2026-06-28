@@ -1,5 +1,6 @@
 from decimal import Decimal
-
+from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -39,7 +40,9 @@ class SerializerContextMixin:
 # ==============================================================================
 # VIEWSET DE ÓRDENES
 # ==============================================================================
-
+@extend_schema(parameters=[
+    OpenApiParameter("id", OpenApiTypes.UUID, OpenApiParameter.PATH)
+])
 class OrdenViewSet(
     SerializerContextMixin,
     mixins.ListModelMixin,
