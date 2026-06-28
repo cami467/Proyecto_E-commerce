@@ -14,22 +14,15 @@ def crear_notificacion(self, usuario_id, tipo, titulo, mensaje, referencia_id=""
     Se ejecuta en segundo plano a través de Celery para no bloquear
     el request HTTP que dispara el evento de negocio.
 
-    Args:
-        usuario_id: ID del usuario destinatario.
-        tipo: Uno de los valores de Notificacion.Tipo.
-        titulo: Título corto de la notificación.
-        mensaje: Contenido detallado.
-        referencia_id: UUID del objeto relacionado (orden, pago, etc.).
-
-    Reintentos:
-        Si falla (ej: problema de conexión a la BD), reintenta
-        hasta 3 veces con 10 segundos de espera entre intentos.
     """
     try:
         usuario = Usuario.objects.get(pk=usuario_id)
     except Usuario.DoesNotExist:
-        # Si el usuario fue eliminado, no tiene sentido reintentar.
+        # Error permanente: el usuario no existe, reintentar no ayuda.
         return f"Usuario {usuario_id} no existe. Notificación descartada."
+    except Exception as exc:
+        # Error transitorio (ej: conexion a la BD): reintentar.
+        raise self.retry(exc=exc)
 
     notificacion = Notificacion.objects.create(
         usuario=usuario,
