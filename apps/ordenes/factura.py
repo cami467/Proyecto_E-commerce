@@ -1,4 +1,5 @@
 import os
+from django.utils import timezone as django_timezone
 import hashlib
 from decimal import Decimal
 from io import BytesIO
@@ -247,8 +248,9 @@ def generar_factura_pdf(orden) -> BytesIO:
     # ------------------------------------------------------------------
     # DATOS DEL CLIENTE
     # ------------------------------------------------------------------
-    fecha_emision = orden.fecha_creacion.strftime("%d/%m/%Y")
-    hora_emision = orden.fecha_creacion.strftime("%H:%M:%S")
+    fecha_local = django_timezone.localtime(orden.fecha_creacion)
+    fecha_emision = fecha_local.strftime("%d/%m/%Y")
+    hora_emision = fecha_local.strftime("%H:%M:%S")
     nombre_cliente = orden.usuario.get_full_name() or orden.usuario.username
     correo_cliente = str(orden.usuario.email or "-")
 
