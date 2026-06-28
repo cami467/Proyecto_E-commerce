@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
-
+from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 from django.conf import settings
 from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
@@ -35,7 +36,18 @@ class SerializerContextMixin:
 # ==============================================================================
 # VIEWSET DE PAGOS
 # ==============================================================================
-
+@extend_schema_view(
+    retrieve=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.PATH,
+                description="UUID del pago.",
+            )
+        ]
+    )
+)
 class PagoViewSet(
     SerializerContextMixin,
     mixins.ListModelMixin,
