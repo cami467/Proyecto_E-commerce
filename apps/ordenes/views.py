@@ -40,9 +40,44 @@ class SerializerContextMixin:
 # ==============================================================================
 # VIEWSET DE ÓRDENES
 # ==============================================================================
-@extend_schema(parameters=[
-    OpenApiParameter("id", OpenApiTypes.UUID, OpenApiParameter.PATH)
-])
+@extend_schema_view(
+    retrieve=extend_schema(
+        summary="Ver detalle de una orden",
+        description="Retorna toda la información de una orden específica, incluyendo sus ítems históricos congelados.",
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="UUID de la orden a consultar",
+            )
+        ],
+    ),
+    cancelar=extend_schema(
+        summary="Cancelar una orden pendiente",
+        description="Transiciona el estado de la orden a cancelada y devuelve el stock retenido a las variantes.",
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="UUID de la orden a cancelar",
+            )
+        ],
+    ),
+    factura=extend_schema(
+        summary="Descargar factura en PDF",
+        description="Genera y descarga en tiempo real el comprobante legal en formato PDF A4.",
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="UUID de la orden para la factura",
+            )
+        ],
+    ),
+)
 class OrdenViewSet(
     SerializerContextMixin,
     mixins.ListModelMixin,

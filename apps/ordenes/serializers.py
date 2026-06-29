@@ -53,7 +53,9 @@ class ItemOrdenSerializer(serializers.ModelSerializer):
             "nombre_variante",
             "cantidad",
             "precio_unitario",
+            "tasa_iva",
             "subtotal",
+            "monto_iva",
         ]
         read_only_fields = fields
 
@@ -66,6 +68,7 @@ class ItemOrdenSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data["precio_unitario"] = int(instance.precio_unitario)
         data["subtotal"] = int(instance.subtotal)
+        data["monto_iva"] = int(instance.monto_iva)
         return data
 
 

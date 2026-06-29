@@ -189,7 +189,7 @@ class CuponAdmin(admin.ModelAdmin):
 
     def col_usos_restantes(self, obj):
         """Muestra los usos restantes del cupón."""
-        if obj._state.adding:
+        if obj.pk is None:
             return mark_safe(
                 '<span style="color:#6c757d;">'
                 'Se calculará al guardar</span>'

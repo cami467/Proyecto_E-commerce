@@ -9,10 +9,16 @@ Usuario = get_user_model()
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
 def crear_notificacion(self, usuario_id, tipo, titulo, mensaje, referencia_id=""):
     """
-    Tarea asíncrona que crea una notificación para un usuario.
-
-    Se ejecuta en segundo plano a través de Celery para no bloquear
-    el request HTTP que dispara el evento de negocio.
+    Tarea asíncrona que crea una notificación para un usuario en la base de datos.
+        Se ejecuta en segundo plano a través de Celery para no bloquear el ciclo
+        de respuesta (Request/Response) HTTP de la API principal.
+        
+        Args:
+            usuario_id (str): UUID del usuario destinatario.
+            tipo (str): Tipo de notificación según los canales del modelo (ej: 'pago', 'orden').
+            titulo (str): Título corto de la notificación.
+            mensaje (str): Cuerpo o descripción del evento.
+            referencia_id (str, opcional): UUID de la entidad relacionada (Orden, Pago, etc.).
 
     """
     try:

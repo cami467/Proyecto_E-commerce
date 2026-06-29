@@ -1,4 +1,4 @@
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
@@ -12,9 +12,32 @@ from .serializers import NotificacionSerializer, NotificacionListSerializer
 # ==============================================================================
 # VIEWSET DE NOTIFICACIONES
 # ==============================================================================
-@extend_schema(parameters=[
-    OpenApiParameter("id", OpenApiTypes.UUID, OpenApiParameter.PATH)
-])
+@extend_schema_view(
+    retrieve=extend_schema(
+        summary="Obtener detalle de una notificación",
+        description="Retorna el contenido completo de una notificación específica.",
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="UUID de la notificación",
+            )
+        ],
+    ),
+    marcar_leida=extend_schema(
+        summary="Marcar notificación como leída",
+        description="Cambia el estado de una notificación específica a leída de forma idempotente.",
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="UUID de la notificación a marcar",
+            )
+        ],
+    ),
+)
 class NotificacionViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,

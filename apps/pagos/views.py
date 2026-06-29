@@ -6,9 +6,9 @@ from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
 
-from core.exceptions import PagoFallido
 from .models import Pago
 from .serializers import (
     PagoSerializer,
@@ -43,10 +43,28 @@ class SerializerContextMixin:
                 name="id",
                 type=OpenApiTypes.UUID,
                 location=OpenApiParameter.PATH,
-                description="UUID del pago.",
+                description="UUID del pago a consultar",
             )
-        ]
-    )
+        ],
+        summary="Ver detalle de un pago",
+        description="Retorna la información completa de una transacción financiera específica.",
+    ),
+    list=extend_schema(
+        summary="Listar mis pagos",
+        description="Retorna el historial completo de pagos realizados o pendientes del usuario autenticado.",
+    ),
+    crear_pago=extend_schema(
+        request=CrearPagoSerializer,
+        responses={201: PagoSerializer},
+        summary="Registrar o iniciar un pago",
+        description="Inicia el proceso de pago para una orden pendiente, validando montos y estados.",
+    ),
+    simular_pago=extend_schema(
+        request=SimularPagoSerializer,
+        responses={200: PagoSerializer},
+        summary="Simular pasarela de pagos (Solo DEBUG)",
+        description="Permite simular la aprobación o rechazo de una pasarela externa. Requiere DEBUG=True.",
+    ),
 )
 class PagoViewSet(
     SerializerContextMixin,
@@ -226,10 +244,8 @@ class PagoViewSet(
         """
         # Bloqueo de seguridad: nunca disponible en producción
         if not settings.DEBUG:
-            return Response(
-                {"detail": "Este endpoint no está disponible en producción."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            if not settings.DEBUG:
+                raise PermissionDenied("El simulador de pagos solo está disponible en entorno de desarrollo.")
 
         serializer = SimularPagoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -247,23 +263,13 @@ class PagoViewSet(
                 orden__usuario=request.user
             )
         except Pago.DoesNotExist:
-            return Response(
-                {"detail": "El pago no existe o no te pertenece."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            raise ValidationError({"pago": "El pago no existe o no te pertenece."})
 
         # Verificar que el pago esté pendiente
         if not pago.esta_pendiente:
-            return Response(
-                {
-                    "detail": (
-                        f"No se puede simular un pago en estado "
-                        f"'{pago.get_estado_display()}'. "
-                        f"Solo se pueden simular pagos pendientes."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT
-            )
+           raise ValidationError({
+                "pago": f"No se puede simular un pago en estado '{pago.get_estado_display()}'. Solo se permiten pagos pendientes."
+            })
 
         # Aplicar el resultado simulado
         respuesta_simulada = {
