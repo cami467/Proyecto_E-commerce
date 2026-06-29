@@ -53,18 +53,6 @@ class SerializerContextMixin:
         summary="Listar mis pagos",
         description="Retorna el historial completo de pagos realizados o pendientes del usuario autenticado.",
     ),
-    crear_pago=extend_schema(
-        request=CrearPagoSerializer,
-        responses={201: PagoSerializer},
-        summary="Registrar o iniciar un pago",
-        description="Inicia el proceso de pago para una orden pendiente, validando montos y estados.",
-    ),
-    simular_pago=extend_schema(
-        request=SimularPagoSerializer,
-        responses={200: PagoSerializer},
-        summary="Simular pasarela de pagos (Solo DEBUG)",
-        description="Permite simular la aprobación o rechazo de una pasarela externa. Requiere DEBUG=True.",
-    ),
 )
 class PagoViewSet(
     SerializerContextMixin,
@@ -123,12 +111,20 @@ class PagoViewSet(
     # ACCIÓN: CREAR PAGO
     # ------------------------------------------------------------------
 
+    
+    @extend_schema(
+        request=CrearPagoSerializer,
+        responses={201: PagoSerializer},
+        summary="Registrar o iniciar un pago",
+        description="Inicia el proceso de pago para una orden pendiente, validando montos y estados.",
+    )
     @action(
         detail=False,
         methods=["post"],
         url_path="crear",
         url_name="crear"
     )
+    @action(detail=False, methods=["post"], url_path="crear_pago")
     def crear(self, request) -> Response:
         """
         Inicia un pago sobre una orden existente del usuario.
@@ -217,13 +213,21 @@ class PagoViewSet(
     # ------------------------------------------------------------------
     # ACCIÓN: SIMULAR PAGO (SOLO DEBUG)
     # ------------------------------------------------------------------
-
-    @action(
-        detail=False,
-        methods=["post"],
-        url_path="simular",
-        url_name="simular"
+    @extend_schema(
+        request=SimularPagoSerializer,
+        responses={200: PagoSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="id",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.PATH,
+                description="UUID del pago a simular",
+            )
+        ],
+        summary="Simular pasarela de pagos (Solo DEBUG)",
+        description="Permite simular la aprobación o rechazo de una pasarela externa. Requiere DEBUG=True.",
     )
+    @action(detail=True, methods=["post"], url_path="simular_pago")
     def simular(self, request) -> Response:
         """
         Simula el resultado de un pago para desarrollo y testing.
