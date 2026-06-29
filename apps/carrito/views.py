@@ -125,6 +125,7 @@ class ItemCarritoViewSet(
     """
     permission_classes = [IsAuthenticated]
     serializer_class = ActualizarCantidadSerializer
+    queryset = ItemCarrito.objects.all()
 
     def get_queryset(self):
         """
