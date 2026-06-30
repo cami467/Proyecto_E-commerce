@@ -70,7 +70,7 @@ class PagoViewSet(
         GET  /api/pagos/              - Listar mis pagos
         GET  /api/pagos/{id}/         - Detalle de un pago
         POST /api/pagos/crear/        - Iniciar un pago
-        POST /api/pagos/simular/      - Simular pago (solo DEBUG)
+        POST /api/pagos/simular_pago/      - Simular pago (solo DEBUG)
 
     Seguridad:
         - Solo se retornan pagos de órdenes del usuario autenticado.
@@ -124,7 +124,6 @@ class PagoViewSet(
         url_path="crear",
         url_name="crear"
     )
-    @action(detail=False, methods=["post"], url_path="crear_pago")
     def crear(self, request) -> Response:
         """
         Inicia un pago sobre una orden existente del usuario.
@@ -216,18 +215,10 @@ class PagoViewSet(
     @extend_schema(
         request=SimularPagoSerializer,
         responses={200: PagoSerializer},
-        parameters=[
-            OpenApiParameter(
-                name="id",
-                type=OpenApiTypes.UUID,
-                location=OpenApiParameter.PATH,
-                description="UUID del pago a simular",
-            )
-        ],
         summary="Simular pasarela de pagos (Solo DEBUG)",
         description="Permite simular la aprobación o rechazo de una pasarela externa. Requiere DEBUG=True.",
     )
-    @action(detail=True, methods=["post"], url_path="simular_pago")
+    @action(detail=False, methods=["post"], url_path="simular_pago")
     def simular(self, request) -> Response:
         """
         Simula el resultado de un pago para desarrollo y testing.
@@ -248,8 +239,7 @@ class PagoViewSet(
         """
         # Bloqueo de seguridad: nunca disponible en producción
         if not settings.DEBUG:
-            if not settings.DEBUG:
-                raise PermissionDenied("El simulador de pagos solo está disponible en entorno de desarrollo.")
+            raise PermissionDenied("El simulador de pagos solo está disponible en entorno de desarrollo.")
 
         serializer = SimularPagoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

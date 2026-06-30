@@ -184,10 +184,7 @@ class OrdenListSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         for campo in ("subtotal", "monto_descuento", "costo_envio", "total"):
             if data.get(campo) is not None:
-                data[campo] = int(instance.__class__._default_manager
-                                  .filter(pk=instance.pk)
-                                  .values_list(campo, flat=True)
-                                  .first() or 0)
+                data[campo] = int(getattr(instance, campo, 0) or 0)
         return data
 
 
