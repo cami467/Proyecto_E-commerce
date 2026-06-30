@@ -72,6 +72,68 @@ class AutenticacionAPITestCase(APITestCase):
             email="usuario_login_test@tienda.com",
             password="Password123"
         )
+        
+    def test_registro_rechaza_password_debil(self):
+        """El registro rechaza passwords cortas, sin mayuscula y sin caracter especial."""
+        response = self.client.post(reverse("registro"), {
+            "username": "camila",
+            "email": "camila@tienda.com",
+            "password": "cami123",
+            "password2": "cami123",
+            "telefono": "0981123456",
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password", response.data)
+        
+    def test_registro_rechaza_telefono_con_letras(self):
+        """El registro no acepta telefonos con letras."""
+        response = self.client.post(reverse("registro"), {
+            "username": "telefono_test",
+            "email": "telefono_test@tienda.com",
+            "password": "Password123!",
+            "password2": "Password123!",
+            "telefono": "abc123",
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("telefono", response.data)
+        
+    def test_registro_acepta_email_con_alias_y_subdominio(self):
+        """Los alias y subdominios son emails validos y no deben bloquearse."""
+        response = self.client.post(reverse("registro"), {
+            "username": "email_valido",
+            "email": "user+test@sub.domain.com",
+            "password": "Password123!",
+            "password2": "Password123!",
+            "telefono": "0981123456",
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(Usuario.objects.filter(email="user+test@sub.domain.com").exists())
+        
+    def test_registro_rechaza_password_demasiado_largo(self):
+        """El registro rechaza contraseñas de mas de 64 caracteres."""
+        password_largo = "A" + "a" * 65 + "1!"
+        response = self.client.post(reverse("registro"), {
+            "username": "password_largo",
+            "email": "password_largo@tienda.com",
+            "password": password_largo,
+            "password2": password_largo,
+            "telefono": "0981123456",
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password", response.data)
+        
+    def test_registro_normaliza_telefono_paraguayo(self):
+        """El registro guarda telefonos paraguayos en formato internacional normalizado."""
+        response = self.client.post(reverse("registro"), {
+            "username": "telefono_ok",
+            "email": "telefono_ok@tienda.com",
+            "password": "Password123!",
+            "password2": "Password123!",
+            "telefono": "0981 123-456",
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        usuario = Usuario.objects.get(username="telefono_ok")
+        self.assertEqual(usuario.telefono, "+595981123456")
 
     def test_login_exitoso_retorna_tokens(self):
         """Login con credenciales correctas retorna access y refresh."""

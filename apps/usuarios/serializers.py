@@ -4,8 +4,14 @@ from rest_framework.validators import UniqueValidator
 from drf_spectacular.utils import extend_schema_field
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
+import re
 
 Usuario = get_user_model()
+
+USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_.-]+$")
+TELEFONO_CHARS_REGEX = re.compile(r"^[+0-9()\s-]+$")
+TELEFONO_NORMALIZADO_REGEX = re.compile(r"^\+5959\d{8}$")
+PASSWORD_ESPECIAL_REGEX = re.compile(r"[^A-Za-z0-9]")
 
 
 # ==============================================================================
@@ -29,9 +35,11 @@ class RegistroSerializer(serializers.ModelSerializer):
     )
     password = serializers.CharField(
         write_only=True,
-        min_length=8,
+        min_length=10,
+        max_length=64,
+        trim_whitespace=False,
         style={"input_type": "password"}
-    )
+   )
     password2 = serializers.CharField(
         write_only=True,
         style={"input_type": "password"}
@@ -40,27 +48,110 @@ class RegistroSerializer(serializers.ModelSerializer):
     class Meta:
         model = Usuario
         fields = ["username", "email", "password", "password2", "telefono"]
+        
+    def validate_username(self, value):
+        """Valida un nombre de usuario seguro y consistente."""
+        value = value.strip()
+
+        if len(value) < 3 or len(value) > 30:
+            raise serializers.ValidationError(
+                "El usuario debe tener entre 3 y 30 caracteres."
+            )
+
+        if not USERNAME_REGEX.fullmatch(value):
+            raise serializers.ValidationError(
+                "El usuario solo puede contener letras, números, punto, guion y guion bajo."
+            )
+
+        if Usuario.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError(
+                "Ya existe una cuenta con este nombre de usuario."
+            )
+
+        return value
 
     def validate_email(self, value):
-        """Normaliza el email a minusculas."""
-        return value.lower()
+        """Normaliza el email sin bloquear formatos validos como alias o subdominios."""
+        value = value.strip().lower()
+        if len(value) > 254:
+            raise serializers.ValidationError("El email no puede superar 254 caracteres.")
+        return value
+    
+    def validate_telefono(self, value):
+        """Valida y normaliza telefonos paraguayos al formato +5959XXXXXXXX."""
+        if value in (None, ""):
+            return value
+
+        value = value.strip()
+        if not TELEFONO_CHARS_REGEX.fullmatch(value):
+            raise serializers.ValidationError(
+                "El telefono solo puede contener numeros, espacios, guiones, parentesis o el prefijo +."
+            )
+
+        digitos = re.sub(r"\D", "", value)
+
+        if digitos.startswith("0") and len(digitos) == 10:
+            normalizado = "+595" + digitos[1:]
+        elif digitos.startswith("595") and len(digitos) == 12:
+            normalizado = "+" + digitos
+        else:
+            raise serializers.ValidationError(
+                "Ingrese un telefono paraguayo valido. Ejemplo: 0981123456 o +595981123456."
+            )
+
+        if not TELEFONO_NORMALIZADO_REGEX.fullmatch(normalizado):
+            raise serializers.ValidationError(
+                "Ingrese un telefono paraguayo valido. Ejemplo: 0981123456 o +595981123456."
+            )
+            
+        return normalizado
 
     def validate_password(self, value):
-        """Aplica validadores de contraseña oficiales de Django."""
+        """Aplica validaciones de seguridad para contraseñas de usuarios."""
         try:
             password_validation.validate_password(value)
         except DjangoValidationError as e:
             raise serializers.ValidationError(list(e.messages))
+
+        errores = []
+        if not any(char.islower() for char in value):
+            errores.append("La contraseña debe incluir al menos una letra minuscula.")
+        if not any(char.isupper() for char in value):
+            errores.append("La contraseña debe incluir al menos una letra mayuscula.")
+        if not any(char.isdigit() for char in value):
+            errores.append("La contraseña debe incluir al menos un numero.")
+        if not PASSWORD_ESPECIAL_REGEX.search(value):
+            errores.append("La contraseña debe incluir al menos un caracter especial.")
+
+        if errores:
+            raise serializers.ValidationError(errores)
+
         return value
 
     def validate(self, data):
-        """Verifica coincidencia de contraseñas de manera segura."""
+        """Verifica coincidencia de contraseñas y evita datos personales dentro de la clave."""
         password = data.get("password")
         password2 = data.get("password2")
+
         if password and password2 and password != password2:
             raise serializers.ValidationError({
                 "password2": "Las contraseñas no coinciden."
             })
+
+        if password:
+            password_lower = password.lower()
+            datos_personales = [
+                data.get("username", ""),
+                data.get("email", "").split("@")[0],
+                re.sub(r"\D", "", data.get("telefono") or ""),
+            ]
+            for dato in datos_personales:
+                dato = str(dato).strip().lower()
+                if dato and len(dato) >= 4 and dato in password_lower:
+                    raise serializers.ValidationError({
+                        "password": "La contraseña no debe contener datos personales del usuario."
+                    })
+
         return data
 
     def create(self, validated_data):
@@ -108,7 +199,9 @@ class UsuarioSerializer(serializers.ModelSerializer):
         Normaliza email y verifica unicidad excluyendo al usuario actual.
         Funciona tanto en creacion como en edicion.
         """
-        value = value.lower()
+        value = value.strip().lower()
+        if len(value) > 254:
+            raise serializers.ValidationError("El email no puede superar 254 caracteres.")
         queryset = Usuario.objects.filter(email__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)
@@ -117,6 +210,11 @@ class UsuarioSerializer(serializers.ModelSerializer):
                 "Ya existe una cuenta con este email."
             )
         return value
+    
+    def validate_telefono(self, value):
+        """Reutiliza la misma regla de telefono del registro al editar perfil."""
+        return RegistroSerializer().validate_telefono(value)
+
 
 # ==============================================================================
 # SERIALIZER DE LOGOUT
@@ -133,3 +231,9 @@ class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField(
         help_text="Refresh token a invalidar."
     )
+    
+    def validate_refresh(self, value):
+        """Valida que el refresh token tenga un formato mínimo válido."""
+        if not value or len(value) < 20:
+            raise serializers.ValidationError("El token de refresco no es válido.")
+        return value
