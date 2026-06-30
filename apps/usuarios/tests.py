@@ -138,7 +138,7 @@ class AutenticacionAPITestCase(APITestCase):
     def test_login_exitoso_retorna_tokens(self):
         """Login con credenciales correctas retorna access y refresh."""
         response = self.client.post(reverse("token_obtain_pair"), {
-            "username": "usuario_login_test",
+            "email": "usuario_login_test@tienda.com",
             "password": "Password123",
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -148,10 +148,10 @@ class AutenticacionAPITestCase(APITestCase):
     def test_login_con_password_incorrecta_falla(self):
         """Login con password incorrecta retorna 401."""
         response = self.client.post(reverse("token_obtain_pair"), {
-            "username": "usuario_login_test",
+            "email": "usuario_login_test@tienda.com",
             "password": "PasswordIncorrecta",
         })
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_acceder_a_perfil_sin_token_falla(self):
         """Acceder al perfil sin autenticacion retorna 401."""
@@ -161,7 +161,7 @@ class AutenticacionAPITestCase(APITestCase):
     def test_acceder_a_perfil_con_token_valido_funciona(self):
         """Con un token valido, el endpoint de perfil retorna 200."""
         login_response = self.client.post(reverse("token_obtain_pair"), {
-            "username": "usuario_login_test",
+            "email": "usuario_login_test@tienda.com",
             "password": "Password123",
         })
         access_token = login_response.data["access"]

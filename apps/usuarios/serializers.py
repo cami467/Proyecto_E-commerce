@@ -4,6 +4,8 @@ from rest_framework.validators import UniqueValidator
 from drf_spectacular.utils import extend_schema_field
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth import authenticate
 import re
 
 Usuario = get_user_model()
@@ -214,6 +216,51 @@ class UsuarioSerializer(serializers.ModelSerializer):
     def validate_telefono(self, value):
         """Reutiliza la misma regla de telefono del registro al editar perfil."""
         return RegistroSerializer().validate_telefono(value)
+    
+
+
+# ==============================================================================
+# SERIALIZER DE LOGIN POR EMAIL
+# ==============================================================================
+
+class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    Serializer JWT personalizado para iniciar sesión con email y password.
+    Devuelve access y refresh tokens.
+    """
+    username_field = "email"
+
+    email = serializers.EmailField(write_only=True, required=True)
+    password = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
+
+    def validate(self, attrs):
+        email = attrs.get("email", "").strip().lower()
+        password = attrs.get("password")
+
+        try:
+            usuario = Usuario.objects.get(email__iexact=email)
+        except Usuario.DoesNotExist:
+            raise serializers.ValidationError({"detail": "Credenciales inválidas."}, code="authorization")
+
+        if not usuario.is_active:
+            raise serializers.ValidationError({"detail": "La cuenta se encuentra inactiva."}, code="authorization")
+
+        self.user = authenticate(
+            request=self.context.get("request"),
+            username=usuario.get_username(),
+            password=password,
+        )
+
+        if self.user is None:
+            raise serializers.ValidationError({"detail": "Credenciales inválidas."}, code="authorization")
+
+        refresh = self.get_token(self.user)
+
+        return {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+        }
+
 
 
 # ==============================================================================

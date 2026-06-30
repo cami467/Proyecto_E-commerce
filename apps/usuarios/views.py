@@ -2,9 +2,16 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model
-from .serializers import RegistroSerializer, UsuarioSerializer, LogoutSerializer
+
+from .serializers import (
+    EmailTokenObtainPairSerializer,
+    LogoutSerializer,
+    RegistroSerializer,
+    UsuarioSerializer,
+)
 
 Usuario = get_user_model()
 
@@ -33,6 +40,13 @@ class RegistroView(generics.CreateAPIView):
             status=status.HTTP_201_CREATED
         )
 
+class LoginEmailView(TokenObtainPairView):
+    """
+    Endpoint para iniciar sesión con email y password.
+    No requiere autenticación.
+    POST /api/token/
+    """
+    serializer_class = EmailTokenObtainPairSerializer
 
 class PerfilView(generics.RetrieveUpdateAPIView):
     """
