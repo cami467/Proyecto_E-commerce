@@ -16,3 +16,9 @@ if USAR_HTTPS:
     SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30  # 30 dias
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    
+# CORS - dominios del frontend autorizados a consumir esta API.
+CORS_ALLOWED_ORIGINS = config(
+    "CORS_ALLOWED_ORIGINS",
+    default=""
+).split(",")
