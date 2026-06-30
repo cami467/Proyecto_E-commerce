@@ -1,7 +1,10 @@
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model
-from .serializers import RegistroSerializer, UsuarioSerializer
+from .serializers import RegistroSerializer, UsuarioSerializer, LogoutSerializer
 
 Usuario = get_user_model()
 
@@ -63,5 +66,32 @@ class PerfilView(generics.RetrieveUpdateAPIView):
                 "mensaje": "Perfil actualizado exitosamente.",
                 "usuario": serializer.data
             },
+            status=status.HTTP_200_OK
+        )
+        
+class LogoutView(APIView):
+    """
+    Endpoint para cerrar sesion invalidando el refresh token.
+    Requiere autenticacion (access token valido) para evitar
+    que cualquiera blacklistee tokens ajenos sin estar logueado.
+    POST /api/usuarios/logout/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = LogoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            token = RefreshToken(serializer.validated_data["refresh"])
+            token.blacklist()
+        except TokenError:
+            return Response(
+                {"detail": "El refresh token es invalido o ya fue invalidado."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            {"mensaje": "Sesion cerrada exitosamente."},
             status=status.HTTP_200_OK
         )

@@ -117,3 +117,19 @@ class UsuarioSerializer(serializers.ModelSerializer):
                 "Ya existe una cuenta con este email."
             )
         return value
+
+# ==============================================================================
+# SERIALIZER DE LOGOUT
+# ==============================================================================
+
+class LogoutSerializer(serializers.Serializer):
+    """
+    Serializer para invalidar (blacklistear) un refresh token al cerrar sesión.
+
+    El frontend debe enviar el refresh token que tiene almacenado.
+    Una vez blacklisteado, ese token ya no puede usarse para generar
+    nuevos access tokens, incluso si todavia no expiro.
+    """
+    refresh = serializers.CharField(
+        help_text="Refresh token a invalidar."
+    )
