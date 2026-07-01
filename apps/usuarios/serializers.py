@@ -15,6 +15,30 @@ TELEFONO_CHARS_REGEX = re.compile(r"^[+0-9()\s-]+$")
 TELEFONO_NORMALIZADO_REGEX = re.compile(r"^\+5959\d{8}$")
 PASSWORD_ESPECIAL_REGEX = re.compile(r"[^A-Za-z0-9]")
 
+def generar_username_unico(email):
+    """
+    Genera un username interno a partir del email.
+
+    En el contrato publico del ecommerce el usuario inicia sesion con email,
+    por lo tanto el username no debe ser un dato obligatorio para el cliente.
+    Django lo sigue necesitando internamente porque el modelo hereda de AbstractUser.
+    """
+    parte_local = email.split("@", 1)[0]
+    base = re.sub(r"[^a-zA-Z0-9_.-]", "", parte_local).strip("._-").lower()
+
+    if not base:
+        base = "usuario"
+
+    base = base[:24]
+    username = base
+    contador = 1
+
+    while Usuario.objects.filter(username__iexact=username).exists():
+        sufijo = str(contador)
+        username = f"{base[:30 - len(sufijo)]}{sufijo}"
+        contador += 1
+
+    return username
 
 # ==============================================================================
 # SERIALIZER DE REGISTRO
@@ -35,6 +59,12 @@ class RegistroSerializer(serializers.ModelSerializer):
             )
         ]
     )
+    username = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=30,
+        help_text="Campo opcional. Si no se envia, se genera automaticamente desde el email."
+    )
     password = serializers.CharField(
         write_only=True,
         min_length=10,
@@ -54,12 +84,15 @@ class RegistroSerializer(serializers.ModelSerializer):
     def validate_username(self, value):
         """Valida un nombre de usuario seguro y consistente."""
         value = value.strip()
+        
+        if not value:
+            return value
 
         if len(value) < 3 or len(value) > 30:
             raise serializers.ValidationError(
                 "El usuario debe tener entre 3 y 30 caracteres."
             )
-
+                                                                                                                
         if not USERNAME_REGEX.fullmatch(value):
             raise serializers.ValidationError(
                 "El usuario solo puede contener letras, números, punto, guion y guion bajo."
@@ -159,6 +192,8 @@ class RegistroSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Crea el usuario con contraseña hasheada de forma escalable."""
         validated_data.pop("password2", None)
+        if not validated_data.get("username"):
+            validated_data["username"] = generar_username_unico(validated_data["email"])
         return Usuario.objects.create_user(**validated_data)
 
 

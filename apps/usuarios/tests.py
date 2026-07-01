@@ -171,3 +171,34 @@ class AutenticacionAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["username"], "usuario_login_test")
+        
+    def test_registro_sin_username_genera_username_interno(self):
+        """El registro publico no debe obligar al cliente a elegir username."""
+        response = self.client.post(reverse("registro"), {
+            "email": "cliente.nuevo+test@sub.tienda.com",
+            "password": "Password123!",
+            "password2": "Password123!",
+            "telefono": "0981123456",
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        usuario = Usuario.objects.get(email="cliente.nuevo+test@sub.tienda.com")
+        self.assertTrue(usuario.username)
+
+    def test_registro_sin_username_no_colisiona_si_email_local_repetido(self):
+        """Si dos emails tienen la misma parte local, el username interno debe seguir siendo unico."""
+        primer_response = self.client.post(reverse("registro"), {
+            "email": "cliente@tienda.com",
+            "password": "Password123!",
+            "password2": "Password123!",
+        })
+        segundo_response = self.client.post(reverse("registro"), {
+            "email": "cliente@sub.tienda.com",
+            "password": "Password123!",
+            "password2": "Password123!",
+        })
+
+        self.assertEqual(primer_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(segundo_response.status_code, status.HTTP_201_CREATED)
+        usernames = list(Usuario.objects.filter(email__startswith="cliente@").values_list("username", flat=True))
+        self.assertEqual(len(usernames), len(set(usernames)))
