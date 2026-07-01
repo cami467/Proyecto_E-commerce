@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from rest_framework import serializers as drf_serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.validators import UniqueValidator
 from drf_spectacular.utils import extend_schema_field
 from django.contrib.auth import get_user_model, password_validation
@@ -7,6 +8,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
 import re
+import unicodedata
 
 Usuario = get_user_model()
 
@@ -14,6 +16,73 @@ USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_.-]+$")
 TELEFONO_CHARS_REGEX = re.compile(r"^[+0-9()\s-]+$")
 TELEFONO_NORMALIZADO_REGEX = re.compile(r"^\+5959\d{8}$")
 PASSWORD_ESPECIAL_REGEX = re.compile(r"[^A-Za-z0-9]")
+NOMBRE_MIN_LENGTH = 2
+NOMBRE_MAX_LENGTH = 50
+
+def normalizar_espacios(value):
+    """Elimina espacios innecesarios y compacta espacios internos."""
+    return re.sub(r"\s+", " ", value.strip())
+
+
+def validar_nombre_persona(value, nombre_campo):
+    """
+    Valida nombres y apellidos reales sin bloquear acentos.
+
+    Permitido:
+        - Letras unicode: Maria, María, José, Ña        - Espacios internos: María José
+        - Guion: José-Luis
+        - Apostrofe: O'Connor
+
+    No permitido:
+        - Números: Carlos123
+        - Emojis
+        - Símbolos repetidos o nombres formados solo por signos
+    """
+    if value in (None, ""):
+        return ""
+
+    value = normalizar_espacios(value)
+
+    if not (NOMBRE_MIN_LENGTH <= len(value) <= NOMBRE_MAX_LENGTH):
+        raise serializers.ValidationError(
+            f"{nombre_campo} debe tener entre {NOMBRE_MIN_LENGTH} y {NOMBRE_MAX_LENGTH} caracteres."
+        )
+
+    tiene_letra = False
+    caracter_anterior = ""
+
+    for caracter in value:
+        categoria = unicodedata.category(caracter)
+        es_letra = categoria.startswith("L")
+        es_espacio = caracter == " "
+        es_separador_valido = caracter in "-'"
+
+        if es_letra:
+            tiene_letra = True
+        elif not (es_espacio or es_separador_valido):
+            raise serializers.ValidationError(
+                f"{nombre_campo} solo puede contener letras, espacios, guiones o apostrofes."
+            )
+
+        if caracter in " -'" and caracter_anterior in " -'":
+            raise serializers.ValidationError(
+                f"{nombre_campo} no puede contener separadores consecutivos."
+            )
+
+        caracter_anterior = caracter
+
+    if not tiene_letra:
+        raise serializers.ValidationError(
+            f"{nombre_campo} debe contener al menos una letra."
+        )
+
+    if value[0] in "-'" or value[-1] in "-'":
+        raise serializers.ValidationError(
+            f"{nombre_campo} no puede comenzar ni terminar con guion o apostrofe."
+        )
+
+    return value
+
 
 def generar_username_unico(email):
     """
@@ -65,6 +134,16 @@ class RegistroSerializer(serializers.ModelSerializer):
         max_length=30,
         help_text="Campo opcional. Si no se envia, se genera automaticamente desde el email."
     )
+    first_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=NOMBRE_MAX_LENGTH
+    )
+    last_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=NOMBRE_MAX_LENGTH
+    )
     password = serializers.CharField(
         write_only=True,
         min_length=10,
@@ -79,7 +158,23 @@ class RegistroSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Usuario
-        fields = ["username", "email", "password", "password2", "telefono"]
+        fields = [
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "password",
+            "password2",
+            "telefono",
+        ]  
+    
+    def validate_first_name(self, value):
+        """Valida y normaliza el nombre del cliente."""
+        return validar_nombre_persona(value, "El nombre")
+
+    def validate_last_name(self, value):
+        """Valida y normaliza el apellido del cliente."""
+        return validar_nombre_persona(value, "El apellido") 
         
     def validate_username(self, value):
         """Valida un nombre de usuario seguro y consistente."""
@@ -111,6 +206,14 @@ class RegistroSerializer(serializers.ModelSerializer):
         if len(value) > 254:
             raise serializers.ValidationError("El email no puede superar 254 caracteres.")
         return value
+    
+    def validate_first_name(self, value):
+        """Valida y normaliza el nombre al editar perfil."""
+        return validar_nombre_persona(value, "El nombre")
+
+    def validate_last_name(self, value):
+        """Valida y normaliza el apellido al editar perfil."""
+        return validar_nombre_persona(value, "El apellido")
     
     def validate_telefono(self, value):
         """Valida y normaliza telefonos paraguayos al formato +5959XXXXXXXX."""
@@ -215,12 +318,14 @@ class UsuarioSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "first_name",
+            "last_name",
             "nombre_completo",
             "telefono",
             "avatar",
             "date_joined",
         ]
-        read_only_fields = ["id", "date_joined"]
+        read_only_fields = ["id","username", "date_joined"]
 
     @extend_schema_field(drf_serializers.CharField(allow_null=True))
     def get_nombre_completo(self, obj):
@@ -275,10 +380,10 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         try:
             usuario = Usuario.objects.get(email__iexact=email)
         except Usuario.DoesNotExist:
-            raise serializers.ValidationError({"detail": "Credenciales inválidas."}, code="authorization")
+            raise AuthenticationFailed("Credenciales inválidas.")
 
         if not usuario.is_active:
-            raise serializers.ValidationError({"detail": "La cuenta se encuentra inactiva."}, code="authorization")
+            raise AuthenticationFailed("La cuenta se encuentra inactiva.")
 
         self.user = authenticate(
             request=self.context.get("request"),
@@ -287,7 +392,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         )
 
         if self.user is None:
-            raise serializers.ValidationError({"detail": "Credenciales inválidas."}, code="authorization")
+            raise AuthenticationFailed("Credenciales inválidas.")
 
         refresh = self.get_token(self.user)
 

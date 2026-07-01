@@ -70,8 +70,10 @@ class AutenticacionAPITestCase(APITestCase):
         self.usuario_existente = Usuario.objects.create_user(
             username="usuario_login_test",
             email="usuario_login_test@tienda.com",
-            password="Password123"
+            password="Password123!"
         )
+        self.usuario_existente.is_active = True
+        self.usuario_existente.save()
         
     def test_registro_rechaza_password_debil(self):
         """El registro rechaza passwords cortas, sin mayuscula y sin caracter especial."""
@@ -139,7 +141,7 @@ class AutenticacionAPITestCase(APITestCase):
         """Login con credenciales correctas retorna access y refresh."""
         response = self.client.post(reverse("token_obtain_pair"), {
             "email": "usuario_login_test@tienda.com",
-            "password": "Password123",
+            "password": "Password123!",
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
@@ -151,7 +153,7 @@ class AutenticacionAPITestCase(APITestCase):
             "email": "usuario_login_test@tienda.com",
             "password": "PasswordIncorrecta",
         })
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_acceder_a_perfil_sin_token_falla(self):
         """Acceder al perfil sin autenticacion retorna 401."""
@@ -162,10 +164,10 @@ class AutenticacionAPITestCase(APITestCase):
         """Con un token valido, el endpoint de perfil retorna 200."""
         login_response = self.client.post(reverse("token_obtain_pair"), {
             "email": "usuario_login_test@tienda.com",
-            "password": "Password123",
+            "password": "Password123!",
         })
         access_token = login_response.data["access"]
-
+        
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
         response = self.client.get(reverse("perfil"))
 
@@ -202,3 +204,53 @@ class AutenticacionAPITestCase(APITestCase):
         self.assertEqual(segundo_response.status_code, status.HTTP_201_CREATED)
         usernames = list(Usuario.objects.filter(email__startswith="cliente@").values_list("username", flat=True))
         self.assertEqual(len(usernames), len(set(usernames)))
+    def test_registro_normaliza_email_nombre_y_apellido(self):
+        """El registro debe limpiar espacios y guardar el email en minusculas."""
+        response = self.client.post(reverse("registro"), {
+            "email": "  Cliente.Normalizado@GMAIL.COM  ",
+            "first_name": "  María   José  ",
+            "last_name": "  Benítez   López  ",
+            "password": "Password123!",
+            "password2": "Password123!",            "telefono": "0981123456",
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        usuario = Usuario.objects.get(email="cliente.normalizado@gmail.com")
+        self.assertEqual(usuario.first_name, "María José")
+        self.assertEqual(usuario.last_name, "Benítez López")
+
+    def test_registro_rechaza_nombre_con_numeros_o_simbolos(self):
+        """El registro no debe aceptar nombres falsos como Carlos123."""
+        response = self.client.post(reverse("registro"), {
+            "email": "nombre_invalido@tienda.com",
+            "first_name": "Carlos123",
+            "last_name": "@@@@@",
+            "password": "Password123!",
+            "password2": "Password123!",
+            "telefono": "0981123456",
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", response.data)
+        self.assertIn("last_name", response.data)
+
+    def test_perfil_no_permite_modificar_username_interno(self):
+        """El username queda como dato interno y no debe editarse desde el perfil publico."""
+        login_response = self.client.post(reverse("token_obtain_pair"), {
+            "email": "usuario_login_test@tienda.com",
+            "password": "Password123!",
+        })
+        access_token = login_response.data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+        response = self.client.patch(reverse("perfil"), {
+            "username": "nuevo_username_no_permitido",
+            "first_name": "Camila",
+            "last_name": "Benítez",
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.usuario_existente.refresh_from_db()
+        self.assertEqual(self.usuario_existente.username, "usuario_login_test")
+        self.assertEqual(self.usuario_existente.first_name, "Camila")
+        self.assertEqual(self.usuario_existente.last_name, "Benítez")
+        self.assertIn("access", login_response.data)
