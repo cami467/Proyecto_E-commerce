@@ -228,3 +228,127 @@ class VarianteModelTestCase(TestCase):
             stock_minimo=5,
         )
         self.assertTrue(variante.requiere_reposicion)
+
+class ProductoSerializerTestCase(TestCase):
+    """Pruebas de validacion de serializers del catalogo."""
+
+    def setUp(self):
+        self.categoria = Categoria.objects.create(nombre="Celulares")
+
+    def test_producto_write_rechaza_precio_cero(self):
+        from .serializers import ProductoWriteSerializer
+
+        serializer = ProductoWriteSerializer(data={
+            "nombre": "iPhone 15",
+            "categoria": self.categoria.slug,
+            "precio_base": "0",
+            "porcentaje_descuento": "0",
+            "tasa_iva": Producto.TasaIVA.DIEZ,
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("precio_base", serializer.errors)
+
+    def test_producto_write_rechaza_nombre_duplicado_misma_categoria_sin_importar_mayusculas(self):
+        from .serializers import ProductoWriteSerializer
+
+        Producto.objects.create(
+            nombre="iPhone 15",
+            categoria=self.categoria,
+            precio_base=Decimal("5000000"),
+        )
+        serializer = ProductoWriteSerializer(data={
+            "nombre": "iphone 15",
+            "categoria": self.categoria.slug,
+            "precio_base": "5200000",
+            "porcentaje_descuento": "0",
+            "tasa_iva": Producto.TasaIVA.DIEZ,
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("nombre", serializer.errors)
+
+    def test_variante_permite_stock_minimo_mayor_al_inventario(self):
+        from .serializers import VarianteSerializer
+
+        producto = Producto.objects.create(
+            nombre="Samsung A55",
+            categoria=self.categoria,
+            precio_base=Decimal("2500000"),
+        )
+        serializer = VarianteSerializer(data={
+            "producto": producto.id,
+            "nombre": "Color Negro",
+            "sku": "SAM-A55-NEGRO",
+            "modificador_precio": "0",
+            "inventario": 2,
+            "stock_minimo": 5,
+            "atributos": {"color": "negro"},
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_variante_rechaza_sku_duplicado_case_insensitive(self):
+        from .serializers import VarianteSerializer
+
+        producto = Producto.objects.create(
+            nombre="Motorola G",
+            categoria=self.categoria,
+            precio_base=Decimal("1500000"),
+        )
+        Variante.objects.create(
+            producto=producto,
+            nombre="Azul",
+            sku="MOTO-G-AZUL",
+            inventario=3,
+        )
+        serializer = VarianteSerializer(data={
+            "producto": producto.id,
+            "nombre": "Azul Oscuro",
+            "sku": "moto-g-azul",
+            "modificador_precio": "0",
+            "inventario": 1,
+            "stock_minimo": 1,
+            "atributos": {"color": "azul"},
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("sku", serializer.errors)
+
+    def test_categoria_serializer_rechaza_duplicado_raiz_case_insensitive(self):
+        from .serializers import CategoriaSerializer
+
+        Categoria.objects.create(nombre="Accesorios")
+        serializer = CategoriaSerializer(data={
+            "nombre": "accesorios",
+            "descripcion": "Duplicada",
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("nombre", serializer.errors)
+
+
+class VarianteStockTransaccionalTestCase(TestCase):
+    """Pruebas de reglas de negocio del stock."""
+
+    def setUp(self):
+        categoria = Categoria.objects.create(nombre="Audio")
+        producto = Producto.objects.create(
+            nombre="Auricular Bluetooth",
+            categoria=categoria,
+            precio_base=Decimal("180000"),
+        )
+        self.variante = Variante.objects.create(
+            producto=producto,
+            nombre="Negro",
+            sku="AUD-BT-NEGRO",
+            inventario=5,
+        )
+
+    def test_reducir_stock_rechaza_cero(self):
+        with self.assertRaises(ValueError):
+            self.variante.reducir_stock(0)
+
+    def test_incrementar_stock_rechaza_cero(self):
+        with self.assertRaises(ValueError):
+            self.variante.incrementar_stock(0)

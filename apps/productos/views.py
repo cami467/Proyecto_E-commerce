@@ -2,7 +2,7 @@ from rest_framework import viewsets, filters, mixins
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters import rest_framework as django_filters
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch, Q
 from drf_spectacular.utils import extend_schema
 
 from core.permissions import IsAdminOrReadOnly
@@ -100,7 +100,11 @@ class CategoriaViewSet(SerializerContextMixin, viewsets.ModelViewSet):
         Evita repeticion usando una sola variable de manager.
         """
         manager = Categoria.objects if self.request.user.is_staff else Categoria.activos
-        return manager.all().prefetch_related(
+        return manager.all().annotate(
+            _prod_activos_count=Count(
+                "productos", filter=Q(productos__esta_activo=True)
+            )
+        ).prefetch_related(
             Prefetch("subcategorias", queryset=manager.all())
         )
 
@@ -146,10 +150,19 @@ class ProductoViewSet(SerializerContextMixin, viewsets.ModelViewSet):
         Usa manager personalizado con_detalles() para optimizar joins.
         Segrega visibilidad segun rol del usuario.
         """
-        queryset = Producto.objects.con_detalles()
+        variantes_qs = Variante.objects.select_related("producto")
+        imagenes_qs = ImagenProducto.objects.select_related("producto")
+
+        queryset = Producto.objects.select_related("categoria")
         if not self.request.user.is_staff:
             queryset = queryset.filter(esta_activo=True)
-        return queryset
+            variantes_qs = variantes_qs.filter(esta_activo=True)
+            imagenes_qs = imagenes_qs.filter(esta_activo=True)
+
+        return queryset.prefetch_related(
+            Prefetch("variantes", queryset=variantes_qs),
+            Prefetch("imagenes", queryset=imagenes_qs),
+        )
 
     def get_serializer_class(self):
         """
@@ -240,9 +253,12 @@ class VarianteViewSet(SerializerContextMixin, viewsets.ModelViewSet):
     ordering = ["nombre"]
 
     def get_queryset(self):
-        queryset = Variante.objects.select_related("producto")
+        queryset = Variante.objects.select_related("producto", "producto__categoria")
         if not self.request.user.is_staff:
-            queryset = queryset.filter(esta_activo=True)
+            queryset = queryset.filter(
+                esta_activo=True,
+                producto__esta_activo=True,
+            )
         return queryset
 
     def get_serializer_class(self):
@@ -278,9 +294,12 @@ class ImagenProductoViewSet(
     filterset_fields = ["producto__slug", "es_principal"]
 
     def get_queryset(self):
-        queryset = ImagenProducto.objects.select_related("producto")
+        queryset = ImagenProducto.objects.select_related("producto", "producto__categoria")
         if not self.request.user.is_staff:
-            queryset = queryset.filter(esta_activo=True)
+            queryset = queryset.filter(
+                esta_activo=True,
+                producto__esta_activo=True,
+            )
         return queryset
 
     @action(detail=True, methods=["patch"], url_path="marcar-principal")

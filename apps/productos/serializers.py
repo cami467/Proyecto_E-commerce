@@ -4,8 +4,29 @@ from rest_framework import serializers
 from rest_framework import serializers as drf_serializers
 from drf_spectacular.utils import extend_schema_field
 from .models import Categoria, Producto, Variante, ImagenProducto
-from rest_framework.validators import UniqueTogetherValidator
 
+
+
+NOMBRE_CATALOGO_REGEX = re.compile(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 .,'&()/-]*$")
+
+
+def normalizar_texto_catalogo(valor: str) -> str:
+    """Limpia espacios repetidos sin alterar marcas como iPhone o JBL."""
+    return re.sub(r"\s+", " ", valor or "").strip()
+
+
+def validar_nombre_catalogo(valor: str, campo: str = "nombre") -> str:
+    """Valida nombres de categorias, productos y variantes."""
+    valor = normalizar_texto_catalogo(valor)
+    if len(valor) < 2:
+        raise serializers.ValidationError(
+            f"El {campo} debe tener al menos 2 caracteres."
+        )
+    if not NOMBRE_CATALOGO_REGEX.match(valor):
+        raise serializers.ValidationError(
+            f"El {campo} contiene caracteres no permitidos."
+        )
+    return valor
 
 
 # ==============================================================================
@@ -68,26 +89,29 @@ class CategoriaSerializer(serializers.ModelSerializer):
         return obj.productos.filter(esta_activo=True).count()
 
     def validate_nombre(self, value: str) -> str:
-        """Normaliza el nombre y verifica que no exista una categoria con el mismo nombre."""
-        
-        valor_normalizado = value.strip().title()
-        categoria_padre = self.initial_data.get("categoria_padre")
-        queryset = Categoria.objects.filter(
-            nombre__iexact=valor_normalizado,
-            categoria_padre=categoria_padre
-        )
-        if self.instance:
-            queryset = queryset.exclude(pk=self.instance.pk)
-        if queryset.exists():
-            raise serializers.ValidationError(
-                f"Ya existe una categoría llamada '{valor_normalizado}' "
-                f"en este nivel. Usá un nombre diferente."
-            )
-        return valor_normalizado
+        """Normaliza y valida el nombre de categoria."""
+        return validar_nombre_catalogo(value, "nombre de la categoria")
 
     def validate(self, data):
-        """Evita ciclos en la jerarquia con limite de profundidad."""
-        categoria_padre = data.get("categoria_padre")
+        """Evita duplicados por nivel y ciclos en la jerarquia."""
+        nombre = data.get("nombre", getattr(self.instance, "nombre", None))
+        categoria_padre = data.get(
+            "categoria_padre",
+            getattr(self.instance, "categoria_padre", None),
+        )
+
+        if nombre:
+            queryset = Categoria.objects.filter(
+                nombre__iexact=nombre,
+                categoria_padre=categoria_padre,
+            )
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            if queryset.exists():
+                raise serializers.ValidationError({
+                    "nombre": "Ya existe una categoria con este nombre en este nivel."
+                })
+
         if self.instance and categoria_padre:
             if categoria_padre == self.instance:
                 raise serializers.ValidationError({
@@ -138,6 +162,15 @@ class ImagenProductoSerializer(serializers.ModelSerializer):
             except ValueError:
                 pass
         return None
+
+    def validate_imagen(self, value):
+        """Limita imagenes demasiado pesadas para proteger almacenamiento."""
+        max_size_mb = 5
+        if value.size > max_size_mb * 1024 * 1024:
+            raise serializers.ValidationError(
+                f"La imagen no puede superar {max_size_mb} MB."
+            )
+        return value
 
 
 # ==============================================================================
@@ -208,35 +241,42 @@ class VarianteSerializer(serializers.ModelSerializer):
             "requiere_reposicion"
         ]
 
+    def validate_nombre(self, value):
+        """Valida el nombre visible de la variante."""
+        return validar_nombre_catalogo(value, "nombre de la variante")
+
     def validate_sku(self, value):
-        """
-        Normaliza el SKU a mayusculas.
-        Se valida aqui (no via RegexValidator del modelo) para que
-        la normalizacion ocurra ANTES de la validacion de formato
-        """
+        """Normaliza el SKU y valida unicidad antes de llegar a la base."""
         valor = value.strip().upper()
         if not re.match(r"^[A-Z0-9-]+$", valor):
             raise serializers.ValidationError(
                 "El SKU solo permite letras, numeros y guiones (-)."
             )
+        queryset = Variante.objects.filter(sku__iexact=valor)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("Ya existe una variante con este SKU.")
         return valor
 
+    def validate_atributos(self, value):
+        """Asegura que atributos sea un objeto JSON y no una lista/texto."""
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                "Los atributos deben enviarse como objeto JSON."
+            )
+        return value
+
     def validate(self, data):
-        """
-        Validaciones de negocio con soporte PATCH.
-        Usa valores existentes como respaldo si el campo no viene en el request.
-        """
-        inventario = data.get(
-            "inventario",
-            getattr(self.instance, "inventario", 0)
+        """Validaciones de negocio con soporte POST, PUT y PATCH."""
+        producto = data.get("producto", getattr(self.instance, "producto", None))
+        modificador = data.get(
+            "modificador_precio",
+            getattr(self.instance, "modificador_precio", Decimal("0")),
         )
-        stock_minimo = data.get(
-            "stock_minimo",
-            getattr(self.instance, "stock_minimo", 0)
-        )
-        if stock_minimo > inventario:
+        if producto and producto.precio_con_descuento + modificador <= 0:
             raise serializers.ValidationError({
-                "stock_minimo": "El stock minimo no puede ser mayor al inventario."
+                "modificador_precio": "El precio final de la variante debe ser mayor a cero."
             })
         return data
 
@@ -260,6 +300,11 @@ class ProductoListSerializer(serializers.ModelSerializer):
         read_only=True
     )
     imagen_principal = serializers.SerializerMethodField()
+    monto_iva_incluido = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=0,
+        read_only=True,
+    )
 
     class Meta:
         model = Producto
@@ -271,6 +316,8 @@ class ProductoListSerializer(serializers.ModelSerializer):
             "precio_base",
             "porcentaje_descuento",
             "precio_con_descuento",
+            "tasa_iva",
+            "monto_iva_incluido",
             "imagen_principal",
             "es_destacado",
             "esta_activo",
@@ -315,6 +362,11 @@ class ProductoSerializer(serializers.ModelSerializer):
         decimal_places=0,
         read_only=True
     )
+    monto_iva_incluido = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=0,
+        read_only=True,
+    )
 
     class Meta:
         model = Producto
@@ -328,6 +380,8 @@ class ProductoSerializer(serializers.ModelSerializer):
             "precio_base",
             "porcentaje_descuento",
             "precio_con_descuento",
+            "tasa_iva",
+            "monto_iva_incluido",
             "es_destacado",
             "variantes",
             "imagenes",
@@ -338,32 +392,19 @@ class ProductoSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "precio_con_descuento",
+            "monto_iva_incluido",
             "fecha_creacion"
         ]
-        
-        # ─── MODIFICACIÓN ──────────────────────────────────────────
-        # Captura el error de duplicados ANTES de ir a la base de datos
-        validators = [
-            UniqueTogetherValidator(
-                queryset=Producto.objects.all(),
-                fields=['nombre', 'categoria'],
-                message="Ya existe un producto con este nombre en esta categoría."
-            )
-        ]
-        # ──────────────────────────────────────────────────────────────────────
 
     def validate_nombre(self, value):
-        """Normaliza el nombre a titulo."""
-        return value.strip().title()
+        """Normaliza y valida el nombre del producto."""
+        return validar_nombre_catalogo(value, "nombre del producto")
 
     def validate(self, data):
-        """
-        Validaciones de negocio adicionales.
-        Compatible con POST, PUT y PATCH.
-        """
+        """Validaciones de negocio adicionales compatibles con PATCH."""
         descuento = data.get(
             "porcentaje_descuento",
-            getattr(self.instance, "porcentaje_descuento", 0)
+            getattr(self.instance, "porcentaje_descuento", Decimal("0"))
         )
         if descuento and descuento > 90:
             raise serializers.ValidationError({
@@ -395,22 +436,46 @@ class ProductoWriteSerializer(serializers.ModelSerializer):
             "descripcion",
             "precio_base",
             "porcentaje_descuento",
+            "tasa_iva",
             "es_destacado",
             "esta_activo",
         ]
 
     def validate_nombre(self, value):
-        """Normaliza el nombre a titulo."""
-        return value.strip().title()
+        """Normaliza y valida el nombre del producto."""
+        return validar_nombre_catalogo(value, "nombre del producto")
+
+    def validate_precio_base(self, value):
+        """En catalogo no se permiten productos con precio cero."""
+        if value <= 0:
+            raise serializers.ValidationError(
+                "El precio base debe ser mayor a cero."
+            )
+        return value
 
     def validate(self, data):
         """Validaciones de negocio para escritura."""
+        nombre = data.get("nombre", getattr(self.instance, "nombre", None))
+        categoria = data.get("categoria", getattr(self.instance, "categoria", None))
         descuento = data.get(
             "porcentaje_descuento",
-            getattr(self.instance, "porcentaje_descuento", 0)
+            getattr(self.instance, "porcentaje_descuento", Decimal("0"))
         )
+
         if descuento and descuento > 90:
             raise serializers.ValidationError({
                 "porcentaje_descuento": "El descuento no puede superar el 90%."
             })
+
+        if nombre and categoria:
+            queryset = Producto.objects.filter(
+                nombre__iexact=nombre,
+                categoria=categoria,
+            )
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            if queryset.exists():
+                raise serializers.ValidationError({
+                    "nombre": "Ya existe un producto con este nombre en esta categoria."
+                })
         return data

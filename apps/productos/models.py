@@ -1,8 +1,9 @@
 from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q, UniqueConstraint
+from django.db.models.functions import Lower
 from django.utils.text import slugify
 from core.models import ModeloBase
 from core.exceptions import StockInsuficiente
@@ -18,7 +19,7 @@ def generar_slug_unico(instancia, campo_origen, campo_destino="slug"):
     Si 'nike-air-max' existe, genera 'nike-air-max-1', etc.
     """
     valor_origen = getattr(instancia, campo_origen)
-    slug_base = slugify(valor_origen)
+    slug_base = slugify(valor_origen) or "item"
     Klass = instancia.__class__
     slug = slug_base
     contador = 1
@@ -91,9 +92,16 @@ class Categoria(ModeloBase):
         ordering = ["nombre"]
         constraints = [
             UniqueConstraint(
-                fields=["nombre", "categoria_padre"],
-                name="unique_nombre_por_categoria_padre",
-            )
+                Lower("nombre"),
+                name="unique_nombre_categoria_raiz_ci",
+                condition=Q(categoria_padre__isnull=True),
+            ),
+            UniqueConstraint(
+                Lower("nombre"),
+                "categoria_padre",
+                name="unique_nombre_por_categoria_padre_ci",
+                condition=Q(categoria_padre__isnull=False),
+            ),
         ]
 
     def __str__(self):
@@ -181,18 +189,16 @@ class Producto(ModeloBase):
         verbose_name = "Producto"
         verbose_name_plural = "Productos"
         ordering = ["-fecha_creacion"]
-        
-        # ─── MODIFICACIÓN  ──────────────────────────────────────────
-        # Evita que se dupliquen productos con el mismo nombre en la misma categoría
+
         constraints = [
             UniqueConstraint(
-                fields=["nombre", "categoria"],
-                name="unique_nombre_por_categoria",
-                violation_error_message="Ya existe un producto con este nombre en esta categoría."
+                Lower("nombre"),
+                "categoria",
+                name="unique_nombre_por_categoria_ci",
+                condition=Q(categoria__isnull=False),
+                violation_error_message="Ya existe un producto con este nombre en esta categoría.",
             )
         ]
-        # ────────────────────────────────────────────────────────────────────
-
 
     def __str__(self):
         return self.nombre
@@ -293,36 +299,36 @@ class Variante(ModeloBase):
 
     def incrementar_stock(self, cantidad):
         """
-        Incrementa el stock de forma controlada.
-        Usa update_fields para optimizar la consulta SQL.
+        Incrementa el stock de forma transaccional.
+        Evita inconsistencias cuando varios procesos modifican inventario.
         """
-        if cantidad < 0:
+        if cantidad <= 0:
             raise ValueError("La cantidad a incrementar debe ser positiva.")
-        self.inventario += cantidad
-        self.save(update_fields=[
-            "inventario",
-            "esta_activo",
-            "fecha_actualizacion"
-        ])
+
+        with transaction.atomic():
+            variante = type(self).objects.select_for_update().get(pk=self.pk)
+            variante.inventario += cantidad
+            variante.save(update_fields=["inventario", "fecha_actualizacion"])
+            self.inventario = variante.inventario
 
     def reducir_stock(self, cantidad):
         """
-        Reduce el stock de forma controlada.
-        Lanza StockInsuficiente de core si no hay stock suficiente.
+        Reduce el stock de forma transaccional.
+        Lanza StockInsuficiente si no hay inventario suficiente.
         """
-        if cantidad < 0:
+        if cantidad <= 0:
             raise ValueError("La cantidad a reducir debe ser positiva.")
-        if self.inventario - cantidad < 0:
-            raise StockInsuficiente(
-                producto=self.producto.nombre,
-                disponible=self.inventario
-            )
-        self.inventario -= cantidad
-        self.save(update_fields=[
-            "inventario",
-            "esta_activo",
-            "fecha_actualizacion"
-        ])
+
+        with transaction.atomic():
+            variante = type(self).objects.select_for_update().select_related("producto").get(pk=self.pk)
+            if variante.inventario < cantidad:
+                raise StockInsuficiente(
+                    producto=variante.producto.nombre,
+                    disponible=variante.inventario,
+                )
+            variante.inventario -= cantidad
+            variante.save(update_fields=["inventario", "fecha_actualizacion"])
+            self.inventario = variante.inventario
 
 
 class ImagenProducto(ModeloBase):

@@ -154,6 +154,7 @@ class ProductoAdmin(admin.ModelAdmin):
         "precio_base",
         "precio_final",
         "porcentaje_descuento",
+        "tasa_iva",
         "es_destacado",
         "cantidad_variantes",
         "esta_activo",
@@ -179,8 +180,8 @@ class ProductoAdmin(admin.ModelAdmin):
         ("Informacion principal", {
             "fields": ("nombre", "slug", "categoria", "descripcion")
         }),
-        ("Precios", {
-            "fields": ("precio_base", "porcentaje_descuento", "precio_final")
+        ("Precios e impuestos", {
+            "fields": ("precio_base", "porcentaje_descuento", "tasa_iva", "precio_final")
         }),
         ("Opciones", {
             "fields": ("es_destacado", "esta_activo")
