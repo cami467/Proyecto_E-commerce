@@ -146,6 +146,8 @@ class AutenticacionAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
         self.assertIn("refresh", response.data)
+        self.assertIn("usuario", response.data)
+        self.assertEqual(response.data["usuario"]["email"], "usuario_login_test@tienda.com")
 
     def test_login_con_password_incorrecta_falla(self):
         """Login con password incorrecta retorna 401."""
@@ -211,7 +213,8 @@ class AutenticacionAPITestCase(APITestCase):
             "first_name": "  María   José  ",
             "last_name": "  Benítez   López  ",
             "password": "Password123!",
-            "password2": "Password123!",            "telefono": "0981123456",
+            "password2": "Password123!",
+            "telefono": "0981123456",
         })
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -254,3 +257,22 @@ class AutenticacionAPITestCase(APITestCase):
         self.assertEqual(self.usuario_existente.first_name, "Camila")
         self.assertEqual(self.usuario_existente.last_name, "Benítez")
         self.assertIn("access", login_response.data)
+
+
+    def test_perfil_rechaza_nombre_invalido_al_editar(self):
+        """El perfil debe aplicar las mismas reglas de nombres que el registro."""
+        login_response = self.client.post(reverse("token_obtain_pair"), {
+            "email": "usuario_login_test@tienda.com",
+            "password": "Password123!",
+        })
+        access_token = login_response.data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+        response = self.client.patch(reverse("perfil"), {
+            "first_name": "Carlos123",
+            "last_name": "@@@@@",
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", response.data)
+        self.assertIn("last_name", response.data)

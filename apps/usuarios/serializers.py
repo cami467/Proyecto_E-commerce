@@ -206,15 +206,7 @@ class RegistroSerializer(serializers.ModelSerializer):
         if len(value) > 254:
             raise serializers.ValidationError("El email no puede superar 254 caracteres.")
         return value
-    
-    def validate_first_name(self, value):
-        """Valida y normaliza el nombre al editar perfil."""
-        return validar_nombre_persona(value, "El nombre")
 
-    def validate_last_name(self, value):
-        """Valida y normaliza el apellido al editar perfil."""
-        return validar_nombre_persona(value, "El apellido")
-    
     def validate_telefono(self, value):
         """Valida y normaliza telefonos paraguayos al formato +5959XXXXXXXX."""
         if value in (None, ""):
@@ -352,7 +344,15 @@ class UsuarioSerializer(serializers.ModelSerializer):
                 "Ya existe una cuenta con este email."
             )
         return value
-    
+
+
+    def validate_first_name(self, value):
+        """Valida y normaliza el nombre al editar perfil."""
+        return validar_nombre_persona(value, "El nombre")
+
+    def validate_last_name(self, value):
+        """Valida y normaliza el apellido al editar perfil."""
+        return validar_nombre_persona(value, "El apellido")
     def validate_telefono(self, value):
         """Reutiliza la misma regla de telefono del registro al editar perfil."""
         return RegistroSerializer().validate_telefono(value)
@@ -366,7 +366,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
     Serializer JWT personalizado para iniciar sesión con email y password.
-    Devuelve access y refresh tokens.
+    Devuelve access, refresh y datos basicos del usuario autenticado.
     """
     username_field = "email"
 
@@ -383,7 +383,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
             raise AuthenticationFailed("Credenciales inválidas.")
 
         if not usuario.is_active:
-            raise AuthenticationFailed("La cuenta se encuentra inactiva.")
+            raise AuthenticationFailed("Credenciales inválidas.")
 
         self.user = authenticate(
             request=self.context.get("request"),
@@ -399,6 +399,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         return {
             "refresh": str(refresh),
             "access": str(refresh.access_token),
+            "usuario": UsuarioSerializer(self.user, context=self.context).data,
         }
 
 
