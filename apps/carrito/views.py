@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import status, viewsets, mixins
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -11,7 +13,6 @@ from .serializers import (
     ItemCarritoSerializer,
 )
 from core.exceptions import StockInsuficiente
-from apps.productos.models import Variante
 
 
 # ==============================================================================
@@ -58,28 +59,19 @@ class CarritoViewSet(viewsets.GenericViewSet):
         Agrega una variante al carrito o incrementa su cantidad.
         POST /api/carrito/agregar/
         """
-        serializer = AgregarItemSerializer(data=request.data)
+        serializer = AgregarItemSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
 
-        variante_id = serializer.validated_data["variante_id"]
+        variante = serializer.validated_data["variante"]
         cantidad = serializer.validated_data["cantidad"]
-
-        try:
-            variante = Variante.objects.get(
-                id=variante_id,
-                esta_activo=True
-            )
-        except Variante.DoesNotExist:
-            return Response(
-                {"detail": "La variante no existe o no esta disponible."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
         carrito = self.get_carrito()
 
         try:
             item = carrito.agregar_o_actualizar_item(variante, cantidad)
-        except StockInsuficiente as exc:
+        except (StockInsuficiente, DjangoValidationError) as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
@@ -101,7 +93,8 @@ class CarritoViewSet(viewsets.GenericViewSet):
         DELETE /api/carrito/vaciar/
         """
         carrito = self.get_carrito()
-        carrito.vaciar()
+        with transaction.atomic():
+            carrito.vaciar()
         return Response(
             {"mensaje": "Carrito vaciado exitosamente."},
             status=status.HTTP_200_OK
@@ -125,7 +118,6 @@ class ItemCarritoViewSet(
     """
     permission_classes = [IsAuthenticated]
     serializer_class = ActualizarCantidadSerializer
-    queryset = ItemCarrito.objects.all()
 
     def get_queryset(self):
         """
@@ -151,7 +143,7 @@ class ItemCarritoViewSet(
 
         try:
             item.actualizar_cantidad(nueva_cantidad)
-        except StockInsuficiente as exc:
+        except (StockInsuficiente, DjangoValidationError) as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
@@ -163,6 +155,7 @@ class ItemCarritoViewSet(
                 status=status.HTTP_200_OK
             )
 
+        item.refresh_from_db()
         item_serializer = ItemCarritoSerializer(
             item,
             context={"request": request}

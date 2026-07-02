@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
+
 from .models import Carrito, ItemCarrito
+from apps.productos.models import Variante
 from apps.productos.serializers import VarianteListSerializer
 
 
@@ -29,7 +31,13 @@ class ItemCarritoSerializer(serializers.ModelSerializer):
             "subtotal",
             "esta_activo",
         ]
-        read_only_fields = ["id", "subtotal"]
+        read_only_fields = [
+            "id",
+            "variante",
+            "variante_detalle",
+            "subtotal",
+            "esta_activo",
+        ]
 
     @extend_schema_field(serializers.IntegerField())
     def get_subtotal(self, obj):
@@ -49,26 +57,35 @@ class AgregarItemSerializer(serializers.Serializer):
     """
     Serializer para agregar un item al carrito.
     Valida la existencia de la variante, que este activa
-    y que haya stock suficiente.
+    y que haya stock suficiente considerando la cantidad ya cargada.
     """
-    variante_id = serializers.UUIDField()
+    variante_id = serializers.PrimaryKeyRelatedField(
+        source="variante",
+        queryset=Variante.objects.filter(esta_activo=True),
+        error_messages={
+            "does_not_exist": "La variante no existe o no esta disponible.",
+            "incorrect_type": "El identificador de la variante no es valido.",
+        },
+    )
     cantidad = serializers.IntegerField(min_value=1, default=1)
 
     def validate(self, data):
         """Validacion cruzada de variante y stock disponible."""
-        from apps.productos.models import Variante
+        variante = data["variante"]
+        cantidad = data["cantidad"]
+        request = self.context.get("request")
+        cantidad_actual = 0
 
-        try:
-            variante = Variante.objects.get(
-                id=data["variante_id"],
-                esta_activo=True
-            )
-        except Variante.DoesNotExist:
-            raise serializers.ValidationError({
-                "variante_id": "La variante no existe o no esta disponible."
-            })
+        if request and request.user and request.user.is_authenticated:
+            item_existente = ItemCarrito.objects.filter(
+                carrito__usuario=request.user,
+                variante=variante,
+            ).only("cantidad").first()
+            if item_existente:
+                cantidad_actual = item_existente.cantidad
 
-        if variante.inventario < data["cantidad"]:
+        cantidad_total = cantidad_actual + cantidad
+        if variante.inventario < cantidad_total:
             raise serializers.ValidationError({
                 "cantidad": (
                     f"No hay suficiente stock. "
@@ -85,6 +102,14 @@ class ActualizarCantidadSerializer(serializers.Serializer):
     Si la cantidad es 0 el item se elimina automaticamente.
     """
     cantidad = serializers.IntegerField(min_value=0)
+
+    def validate_cantidad(self, value):
+        """Evita cantidades exageradas por error o abuso."""
+        if value > 999:
+            raise serializers.ValidationError(
+                "La cantidad maxima permitida por item es 999."
+            )
+        return value
 
 
 # ==============================================================================
@@ -110,7 +135,14 @@ class CarritoSerializer(serializers.ModelSerializer):
             "total",
             "esta_activo",
         ]
-        read_only_fields = ["id", "usuario", "total", "cantidad_items"]
+        read_only_fields = [
+            "id",
+            "usuario",
+            "items",
+            "total",
+            "cantidad_items",
+            "esta_activo",
+        ]
 
     @extend_schema_field(ItemCarritoSerializer(many=True))
     def get_items(self, obj):
@@ -119,7 +151,8 @@ class CarritoSerializer(serializers.ModelSerializer):
         Usa select_related para evitar N+1 queries.
         """
         items_activos = obj.items.filter(
-            esta_activo=True
+            esta_activo=True,
+            variante__esta_activo=True,
         ).select_related("variante__producto")
         return ItemCarritoSerializer(
             items_activos,

@@ -1,5 +1,6 @@
 from django.conf import settings
-from django.db import models, transaction
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, models, transaction
 from django.db.models import Sum
 
 from core.models import ModeloBase
@@ -9,7 +10,7 @@ from core.exceptions import StockInsuficiente
 class Carrito(ModeloBase):
     """
     Carrito de compras del usuario.
-    Cada usuario posee un único carrito.
+    Cada usuario posee un unico carrito.
     Se crea automaticamente al primer acceso.
     """
     usuario = models.OneToOneField(
@@ -23,7 +24,8 @@ class Carrito(ModeloBase):
         verbose_name_plural = "Carritos"
 
     def __str__(self):
-        return f"Carrito de {self.usuario.username}"
+        identificador = getattr(self.usuario, "email", None) or self.usuario.username
+        return f"Carrito de {identificador}"
 
     def obtener_items_activos(self):
         """
@@ -68,14 +70,39 @@ class Carrito(ModeloBase):
         Agrega o actualiza un item dentro del carrito de manera segura.
         Si el item ya existe suma la cantidad.
         Si es nuevo lo crea con la cantidad indicada.
-        Toda la validacion de stock se delega al ItemCarrito.
+        La operacion bloquea la variante para reducir condiciones de carrera.
         """
+        if cantidad <= 0:
+            raise ValidationError("La cantidad debe ser mayor a cero.")
+
         with transaction.atomic():
-            item, creado = ItemCarrito.objects.get_or_create(
-                carrito=self,
-                variante=variante,
-                defaults={"cantidad": 0}
+            variante_bloqueada = (
+                variante.__class__.objects
+                .select_for_update()
+                .get(pk=variante.pk, esta_activo=True)
             )
+
+            item = (
+                ItemCarrito.objects
+                .select_for_update()
+                .filter(carrito=self, variante=variante_bloqueada)
+                .first()
+            )
+
+            if item is None:
+                try:
+                    item = ItemCarrito.objects.create(
+                        carrito=self,
+                        variante=variante_bloqueada,
+                        cantidad=0,
+                    )
+                except IntegrityError:
+                    item = (
+                        ItemCarrito.objects
+                        .select_for_update()
+                        .get(carrito=self, variante=variante_bloqueada)
+                    )
+
             item.actualizar_cantidad(item.cantidad + cantidad)
             return item
 
@@ -116,10 +143,23 @@ class ItemCarrito(ModeloBase):
         ]
 
     def __str__(self):
-        return (
-            f"{self.cantidad}x {self.variante.nombre} "
-            f"en carrito de {self.carrito.usuario.username}"
+        identificador = (
+            getattr(self.carrito.usuario, "email", None)
+            or self.carrito.usuario.username
         )
+        return f"{self.cantidad}x {self.variante.nombre} en carrito de {identificador}"
+
+    def clean(self):
+        """Valida reglas basicas del item antes de persistirlo."""
+        super().clean()
+        if self.cantidad <= 0:
+            raise ValidationError({
+                "cantidad": "La cantidad debe ser mayor a cero."
+            })
+        if self.variante_id and not self.variante.esta_activo:
+            raise ValidationError({
+                "variante": "La variante no esta disponible."
+            })
 
     @property
     def subtotal(self):
@@ -145,6 +185,8 @@ class ItemCarrito(ModeloBase):
         Lanza StockInsuficiente si no hay suficiente stock.
         """
         variante = self.obtener_variante_bloqueada()
+        if not variante.esta_activo:
+            raise ValidationError("La variante no esta disponible.")
         if variante.inventario < cantidad:
             raise StockInsuficiente(
                 producto=variante.nombre,
@@ -164,6 +206,7 @@ class ItemCarrito(ModeloBase):
         with transaction.atomic():
             self.validar_stock(nueva_cantidad)
             self.cantidad = nueva_cantidad
+            self.full_clean()
             self.save(update_fields=[
                 "cantidad",
                 "fecha_actualizacion"
