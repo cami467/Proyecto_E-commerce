@@ -180,22 +180,43 @@ class AutenticacionAPITestCase(APITestCase):
             }
         },
     )
+    @override_settings(
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "test-login-throttle",
+            }
+        },
+    )
     def test_login_limita_intentos_repetidos(self):
         """El login debe limitar intentos repetidos para mitigar fuerza bruta."""
         from django.core.cache import cache
-        cache.clear()  # Asegura que no arrastre conteos de otros tests
+        from rest_framework.throttling import ScopedRateThrottle
 
-        for _ in range(5):
+        cache.clear()
+
+        # override_settings NO actualiza THROTTLE_RATES porque DRF lo copia
+        # como atributo de clase una sola vez al importar el modulo.
+        # Por eso se parchea directamente aqui, y se restaura al final.
+        rates_originales = ScopedRateThrottle.THROTTLE_RATES
+        ScopedRateThrottle.THROTTLE_RATES = {"login": "5/minute"}
+
+        try:
+            for _ in range(5):
+                response = self.client.post(reverse("token_obtain_pair"), {
+                    "email": "usuario_login_test@tienda.com",
+                    "password": "PasswordIncorrecta",
+                })
+                self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
             response = self.client.post(reverse("token_obtain_pair"), {
                 "email": "usuario_login_test@tienda.com",
                 "password": "PasswordIncorrecta",
             })
-            self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-        response = self.client.post(reverse("token_obtain_pair"), {
-            "email": "usuario_login_test@tienda.com",
-            "password": "PasswordIncorrecta",
-        })
+            self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        finally:
+            ScopedRateThrottle.THROTTLE_RATES = rates_originales
 
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
     def test_acceder_a_perfil_sin_token_falla(self):
