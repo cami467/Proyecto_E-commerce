@@ -2,6 +2,14 @@ from pathlib import Path
 from decouple import config
 from datetime import timedelta
 
+
+def csv_config(nombre_variable, default=""):
+    """Convierte variables de entorno separadas por coma en listas limpias."""
+    return [
+        valor.strip()
+        for valor in config(nombre_variable, default=default).split(",")
+        if valor.strip()
+    ]
 # Ruta base del proyecto (nivel raíz)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
