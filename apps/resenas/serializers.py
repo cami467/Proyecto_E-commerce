@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 
 from .models import Resena
 
@@ -83,9 +82,11 @@ class ResenaSerializer(serializers.ModelSerializer):
             "id",
             "usuario",
             "usuario_username",
+            "producto",
             "producto_nombre",
             "estrellas",
             "es_verificada",
+            "esta_activo",
             "fecha_creacion",
             "fecha_actualizacion",
         ]
@@ -100,15 +101,9 @@ class CrearResenaSerializer(serializers.ModelSerializer):
     Serializer para crear o actualizar una reseña.
 
     El usuario se toma automáticamente del request.
-    El producto se envía como UUID.
-
-    Validaciones:
-        - calificacion: debe ser entre 1 y 5.
-        - Un usuario no puede reseñar el mismo producto dos veces.
-          La restricción UniqueConstraint del modelo lo garantiza
-          a nivel de base de datos.
-        - El producto debe existir y estar activo.
+    El producto se envía como UUID solamente al crear.
     """
+
     class Meta:
         model = Resena
         fields = [
@@ -117,6 +112,13 @@ class CrearResenaSerializer(serializers.ModelSerializer):
             "titulo",
             "comentario",
         ]
+
+    def get_fields(self):
+        """Evita cambiar el producto de una reseña ya creada."""
+        fields = super().get_fields()
+        if self.instance is not None:
+            fields["producto"].read_only = True
+        return fields
 
     def validate_calificacion(self, value: int) -> int:
         """La calificación debe ser entre 1 y 5."""
@@ -127,36 +129,55 @@ class CrearResenaSerializer(serializers.ModelSerializer):
         return value
 
     def validate_titulo(self, value: str) -> str:
-        """Limpia espacios del título."""
-        return value.strip() if value else ""
+        """Limpia espacios y valida una longitud mínima real del título."""
+        titulo = value.strip() if value else ""
+        if titulo and len(titulo) < 3:
+            raise serializers.ValidationError(
+                "El título debe tener al menos 3 caracteres."
+            )
+        return titulo
 
     def validate_comentario(self, value: str) -> str:
-        """Limpia espacios del comentario."""
-        return value.strip() if value else ""
+        """Limpia espacios y limita comentarios demasiado extensos."""
+        comentario = value.strip() if value else ""
+        if comentario and len(comentario) < 5:
+            raise serializers.ValidationError(
+                "El comentario debe tener al menos 5 caracteres."
+            )
+        if len(comentario) > 1000:
+            raise serializers.ValidationError(
+                "El comentario no puede superar los 1000 caracteres."
+            )
+        return comentario
 
     def validate(self, data: dict) -> dict:
         """
-        Verifica que el usuario no haya reseñado ya este producto.
-        Funciona tanto en creación como en actualización.
+        Verifica reglas de negocio de creación/edición.
         """
         usuario = self.context["request"].user
         producto = data.get("producto")
 
-        if producto:
-            queryset = Resena.objects.filter(
-                usuario=usuario,
-                producto=producto
-            )
-            if self.instance:
-                queryset = queryset.exclude(pk=self.instance.pk)
+        if self.instance is not None:
+            data.pop("producto", None)
+            return data
 
-            if queryset.exists():
-                raise serializers.ValidationError({
-                    "producto": (
-                        "Ya dejaste una reseña para este producto. "
-                        "Podés editarla desde tu perfil."
-                    )
-                })
+        if producto is None:
+            raise serializers.ValidationError({
+                "producto": "Debe indicar el producto que desea reseñar."
+            })
+
+        if not producto.esta_activo:
+            raise serializers.ValidationError({
+                "producto": "No se puede reseñar un producto inactivo."
+            })
+
+        if Resena.objects.filter(usuario=usuario, producto=producto).exists():
+            raise serializers.ValidationError({
+                "producto": (
+                    "Ya dejaste una reseña para este producto. "
+                    "Podés editarla desde tu perfil."
+                )
+            })
 
         return data
 

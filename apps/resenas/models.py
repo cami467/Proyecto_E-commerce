@@ -55,7 +55,11 @@ class Resena(ModeloBase):
             models.UniqueConstraint(
                 fields=["usuario", "producto"],
                 name="unique_resena_por_usuario_producto"
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(calificacion__gte=1, calificacion__lte=5),
+                name="resena_calificacion_entre_1_y_5"
+            ),
         ]
         indexes = [
             models.Index(
@@ -79,7 +83,7 @@ class Resena(ModeloBase):
         """
         es_creacion = self._state.adding
         if es_creacion:
-          self.es_verificada = self._calcular_verificacion()
+            self.es_verificada = self._calcular_verificacion()
         super().save(*args, **kwargs)
 
     def _calcular_verificacion(self) -> bool:
