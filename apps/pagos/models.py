@@ -1,8 +1,8 @@
-from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.utils import timezone
+
 from core.models import ModeloBase
 
 
@@ -13,13 +13,6 @@ class Pago(ModeloBase):
     Un pago representa un intento de cobro con una pasarela especifica.
     Una orden puede tener multiples pagos si los anteriores fueron rechazados.
     Solo puede haber un pago aprobado por orden.
-
-    Estados posibles:
-        pending   → El pago fue iniciado pero no procesado.
-        approved  → La pasarela confirmo el cobro exitosamente.
-        rejected  → La pasarela rechazo el intento de cobro.
-        refunded  → El monto fue devuelto al comprador.
-        cancelled → El pago fue cancelado antes de procesarse.
     """
 
     class Pasarela(models.TextChoices):
@@ -80,6 +73,23 @@ class Pago(ModeloBase):
         ordering = ["-fecha_creacion"]
         indexes = [
             models.Index(fields=["orden", "estado"]),
+            models.Index(fields=["pasarela", "id_transaccion"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(monto__gte=1),
+                name="pago_monto_mayor_a_cero",
+            ),
+            models.UniqueConstraint(
+                fields=["orden"],
+                condition=models.Q(estado="approved"),
+                name="un_pago_aprobado_por_orden",
+            ),
+            models.UniqueConstraint(
+                fields=["pasarela", "id_transaccion"],
+                condition=~models.Q(id_transaccion=""),
+                name="transaccion_unica_por_pasarela",
+            ),
         ]
 
     def __str__(self):
@@ -96,6 +106,23 @@ class Pago(ModeloBase):
             raise ValidationError({
                 "monto": "El monto del pago debe ser mayor a cero."
             })
+
+        if self.orden_id and self.monto is not None and self.monto != self.orden.total:
+            raise ValidationError({
+                "monto": "El monto del pago debe coincidir con el total de la orden."
+            })
+
+        if self.id_transaccion:
+            self.id_transaccion = self.id_transaccion.strip().upper()
+
+    def save(self, *args, **kwargs):
+        """
+        Ejecuta validaciones de modelo antes de guardar.
+        En pagos conviene no permitir registros inconsistentes ni siquiera
+        cuando se creen desde código interno.
+        """
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     # ------------------------------------------------------------------
     # PROPIEDADES
@@ -121,11 +148,7 @@ class Pago(ModeloBase):
     # ------------------------------------------------------------------
 
     def _actualizar_estado(self, nuevo_estado, campos_extra=None):
-        """
-        Helper interno para actualizar el estado de forma atomica.
-        Centraliza la logica de guardado para todos los metodos
-        de transicion de estado.
-        """
+        """Actualiza el estado y datos de auditoria."""
         ahora = timezone.now()
         self.estado = nuevo_estado
         self.fecha_procesado = ahora
@@ -141,88 +164,101 @@ class Pago(ModeloBase):
 
     def marcar_aprobado(self, id_transaccion="", respuesta=None):
         """
-        Marca el pago como aprobado y registra la respuesta
-        de la pasarela para auditoria.
-
-        Es idempotente: si ya esta aprobado o reembolsado
-        no hace nada para evitar dobles procesamientos.
+        Marca el pago como aprobado de forma atomica e idempotente.
+        Bloquea los pagos de la orden para evitar dos aprobaciones simultaneas.
         """
-        if self.estado in [self.Estado.APPROVED, self.Estado.REFUNDED]:
-            return
-
         with transaction.atomic():
-            self._actualizar_estado(
-            self.Estado.APPROVED,
-            campos_extra={
-                "id_transaccion": id_transaccion,
-                "respuesta_pasarela": respuesta or {},
-            }
-        )
-
-        from apps.notificaciones.tasks import notificar_pago_aprobado
-        transaction.on_commit(
-            lambda: notificar_pago_aprobado.delay(
-                usuario_id=self.orden.usuario.pk,
-                pago_id=str(self.id),
-                monto=self.monto,
+            pago = (
+                type(self).objects
+                .select_related("orden__usuario")
+                .select_for_update()
+                .get(pk=self.pk)
             )
-        )
 
-    def marcar_rechazado(self, respuesta=None):
-        """
-        Marca el pago como rechazado.
+            if pago.estado in [pago.Estado.APPROVED, pago.Estado.REFUNDED]:
+                return
+            if pago.estado != pago.Estado.PENDING:
+                return
 
-        Solo puede rechazarse un pago pendiente.
-        Si ya fue procesado (aprobado/rechazado) no hace nada.
+            if type(self).objects.filter(
+                orden=pago.orden,
+                estado=pago.Estado.APPROVED,
+            ).exclude(pk=pago.pk).exists():
+                raise ValidationError(
+                    "La orden ya tiene un pago aprobado."
+                )
 
-        La notificacion se programa con transaction.on_commit() por la
-        misma razon explicada en marcar_aprobado().
-        """
-        if self.estado != self.Estado.PENDING:
-            return
-
-        with transaction.atomic():
-            self._actualizar_estado(
-                self.Estado.REJECTED,
+            pago._actualizar_estado(
+                pago.Estado.APPROVED,
                 campos_extra={
-                    "respuesta_pasarela": respuesta or {},
-            }
-        )
-
-        from apps.notificaciones.tasks import notificar_pago_rechazado
-        transaction.on_commit(
-            lambda: notificar_pago_rechazado.delay(
-                usuario_id=self.orden.usuario.pk,
-                pago_id=str(self.id),
-            )
-        )
-
-    def marcar_reembolsado(self, respuesta=None):
-        """
-        Marca el pago como reembolsado.
-
-        Solo puede reembolsarse un pago previamente aprobado.
-        Registra la respuesta de la pasarela para auditoria.
-        """
-        if self.estado != self.Estado.APPROVED:
-            return
-
-        with transaction.atomic():
-            self._actualizar_estado(
-                self.Estado.REFUNDED,
-                campos_extra={
+                    "id_transaccion": id_transaccion,
                     "respuesta_pasarela": respuesta or {},
                 }
             )
 
-    def cancelar(self):
-        """
-        Cancela un pago pendiente.
+            self.estado = pago.estado
+            self.id_transaccion = pago.id_transaccion
+            self.respuesta_pasarela = pago.respuesta_pasarela
+            self.fecha_procesado = pago.fecha_procesado
 
-        Solo puede cancelarse un pago que no haya sido procesado.
-        """
-        if self.estado != self.Estado.PENDING:
-            return
+            from apps.notificaciones.tasks import notificar_pago_aprobado
+            transaction.on_commit(
+                lambda: notificar_pago_aprobado.delay(
+                    usuario_id=pago.orden.usuario.pk,
+                    pago_id=str(pago.id),
+                    monto=pago.monto,
+                )
+            )
 
+    def marcar_rechazado(self, respuesta=None):
+        """Marca el pago como rechazado solo si sigue pendiente."""
         with transaction.atomic():
-            self._actualizar_estado(self.Estado.CANCELLED)
+            pago = type(self).objects.select_for_update().get(pk=self.pk)
+            if pago.estado != pago.Estado.PENDING:
+                return
+
+            pago._actualizar_estado(
+                pago.Estado.REJECTED,
+                campos_extra={
+                    "respuesta_pasarela": respuesta or {},
+                }
+            )
+            self.estado = pago.estado
+            self.respuesta_pasarela = pago.respuesta_pasarela
+            self.fecha_procesado = pago.fecha_procesado
+
+            from apps.notificaciones.tasks import notificar_pago_rechazado
+            transaction.on_commit(
+                lambda: notificar_pago_rechazado.delay(
+                    usuario_id=pago.orden.usuario.pk,
+                    pago_id=str(pago.id),
+                )
+            )
+
+    def marcar_reembolsado(self, respuesta=None):
+        """Marca el pago como reembolsado solo si fue aprobado."""
+        with transaction.atomic():
+            pago = type(self).objects.select_for_update().get(pk=self.pk)
+            if pago.estado != pago.Estado.APPROVED:
+                return
+
+            pago._actualizar_estado(
+                pago.Estado.REFUNDED,
+                campos_extra={
+                    "respuesta_pasarela": respuesta or {},
+                }
+            )
+            self.estado = pago.estado
+            self.respuesta_pasarela = pago.respuesta_pasarela
+            self.fecha_procesado = pago.fecha_procesado
+
+    def cancelar(self):
+        """Cancela un pago pendiente."""
+        with transaction.atomic():
+            pago = type(self).objects.select_for_update().get(pk=self.pk)
+            if pago.estado != pago.Estado.PENDING:
+                return
+
+            pago._actualizar_estado(pago.Estado.CANCELLED)
+            self.estado = pago.estado
+            self.fecha_procesado = pago.fecha_procesado

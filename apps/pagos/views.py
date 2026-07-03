@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied
+from django.db import transaction
 from django.utils import timezone
 
 from .models import Pago
@@ -90,9 +91,17 @@ class PagoViewSet(
         Retorna únicamente los pagos de órdenes del usuario autenticado.
         El filtro por usuario se aplica siempre sin excepciones.
         """
-        return Pago.objects.filter(
-            orden__usuario=self.request.user
-        ).select_related("orden__usuario")
+        usuario = self.request.user
+
+        if not usuario or not usuario.is_authenticated:
+            return Pago.objects.none()
+
+        return (
+        Pago.objects
+        .filter(orden__usuario_id=usuario.id)
+        .select_related("orden", "orden__usuario")
+        .order_by("-fecha_creacion")
+    )
 
     def get_serializer_class(self):
         """
@@ -149,56 +158,58 @@ class PagoViewSet(
                 "pasarela": "efectivo"
             }
         """
-        serializer = CrearPagoSerializer(data=request.data)
+        serializer = CrearPagoSerializer(
+            data=request.data,
+            context=self.get_serializer_context()
+        )
         serializer.is_valid(raise_exception=True)
 
-        orden_id = serializer.validated_data["orden_id"]
+        orden = serializer.validated_data["orden"]
         pasarela = serializer.validated_data["pasarela"]
 
-        # Verificar que la orden exista y pertenezca al usuario
-        try:
-            from apps.ordenes.models import Orden
-            orden = Orden.objects.get(
-                id=orden_id,
-                usuario=request.user
-            )
-        except Orden.DoesNotExist:
-            return Response(
-                {"detail": "La orden no existe o no te pertenece."},
-                status=status.HTTP_404_NOT_FOUND
+        from apps.ordenes.models import Orden
+
+        with transaction.atomic():
+            orden = (
+                Orden.objects
+                .select_for_update()
+                .get(pk=orden.pk, usuario=request.user)
             )
 
-        # Verificar que la orden esté en un estado que permita pago
-        estados_pagables = [
-            Orden.Estado.PENDING,
-            Orden.Estado.CONFIRMED
-        ]
-        if orden.estado not in estados_pagables:
-            return Response(
-                {
-                    "detail": (
-                        f"No se puede pagar una orden en estado "
-                        f"'{orden.get_estado_display()}'. "
-                        f"Solo se pueden pagar órdenes pendientes o confirmadas."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT
-            )
+            estados_pagables = [
+                Orden.Estado.PENDING,
+                Orden.Estado.CONFIRMED,
+            ]
+            if orden.estado not in estados_pagables:
+                return Response(
+                    {
+                        "detail": (
+                            f"No se puede pagar una orden en estado "
+                            f"'{orden.get_estado_display()}'. "
+                            f"Solo se pueden pagar órdenes pendientes o confirmadas."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT
+                )
 
-        # Verificar que no haya un pago aprobado previo
-        if orden.pagos.filter(estado=Pago.Estado.APPROVED).exists():
-            return Response(
-                {"detail": "Esta orden ya tiene un pago aprobado."},
-                status=status.HTTP_409_CONFLICT
-            )
+            if orden.pagos.filter(estado=Pago.Estado.APPROVED).exists():
+                return Response(
+                    {"detail": "Esta orden ya tiene un pago aprobado."},
+                    status=status.HTTP_409_CONFLICT
+                )
 
-        # Crear el pago en estado PENDING
-        pago = Pago.objects.create(
-            orden=orden,
-            pasarela=pasarela,
-            monto=orden.total,
-            estado=Pago.Estado.PENDING,
-        )
+            if orden.pagos.filter(estado=Pago.Estado.PENDING).exists():
+                return Response(
+                    {"detail": "Esta orden ya tiene un pago pendiente."},
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            pago = Pago.objects.create(
+                orden=orden,
+                pasarela=pasarela,
+                monto=orden.total,
+                estado=Pago.Estado.PENDING,
+            )
 
         response_serializer = PagoSerializer(
             pago,

@@ -21,7 +21,7 @@ Evita que se procesen pagos de monto cero o negativo
 antes de llegar al modelo.
 """
 
-MONTO_MAXIMO_PAGO = Decimal("999_999_999")
+MONTO_MAXIMO_PAGO = Decimal("999999999")
 """
 Tope máximo de un pago en Guaraníes.
 Previene errores de datos fuera de rango que pasarían
@@ -222,6 +222,38 @@ class CrearPagoSerializer(serializers.Serializer):
                 f"La pasarela '{value}' no está habilitada en este momento."
             )
         return value
+
+    def validate(self, attrs: dict) -> dict:
+        """Valida la orden antes de que la vista cree el pago."""
+        request = self.context.get("request")
+        if request is None or not request.user.is_authenticated:
+            raise serializers.ValidationError(
+                "Debes iniciar sesión para crear un pago."
+            )
+
+        from apps.ordenes.models import Orden
+
+        try:
+            orden = Orden.objects.get(
+                id=attrs["orden_id"],
+                usuario=request.user,
+            )
+        except Orden.DoesNotExist:
+            raise serializers.ValidationError({
+                "orden_id": "La orden no existe o no te pertenece."
+            })
+
+        if orden.total < MONTO_MINIMO_PAGO:
+            raise serializers.ValidationError({
+                "orden_id": "La orden no tiene un total válido para pagar."
+            })
+        if orden.total > MONTO_MAXIMO_PAGO:
+            raise serializers.ValidationError({
+                "orden_id": "El total de la orden supera el monto máximo permitido."
+            })
+
+        attrs["orden"] = orden
+        return attrs
 
 
 class SimularPagoSerializer(serializers.Serializer):

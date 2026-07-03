@@ -186,3 +186,102 @@ class PagoModelTestCase(TestCase):
         pago.refresh_from_db()
         # Debe seguir aprobado, la cancelacion no debe aplicarse
         self.assertEqual(pago.estado, Pago.Estado.APPROVED)
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+
+class PagoAPITestCase(APITestCase):
+    """Pruebas de API para reglas críticas de pagos."""
+
+    def setUp(self):
+        self.usuario = Usuario.objects.create_user(
+            username="api_pagador",
+            email="api_pagador@tienda.com",
+            password="Password123"
+        )
+        self.otro_usuario = Usuario.objects.create_user(
+            username="otro_pagador",
+            email="otro_pagador@tienda.com",
+            password="Password123"
+        )
+
+        categoria = Categoria.objects.create(nombre="Categoria Pagos API")
+        producto = Producto.objects.create(
+            nombre="Producto Pagos API",
+            categoria=categoria,
+            precio_base=Decimal("100000"),
+            esta_activo=True
+        )
+        variante = Variante.objects.create(
+            producto=producto,
+            nombre="Variante API",
+            sku="PAGO-API-001",
+            inventario=10,
+            stock_minimo=1
+        )
+        carrito = Carrito.objects.create(usuario=self.usuario)
+        ItemCarrito.objects.create(carrito=carrito, variante=variante, cantidad=1)
+        self.orden = crear_orden_desde_carrito(usuario=self.usuario)
+
+        self.client.force_authenticate(user=self.usuario)
+
+    def test_crear_pago_toma_monto_de_la_orden(self):
+        response = self.client.post(
+            reverse("pago-crear"),
+            {
+                "orden_id": str(self.orden.id),
+                "pasarela": Pago.Pasarela.EFECTIVO,
+                "monto": 1,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        pago = Pago.objects.get(id=response.data["id"])
+        self.assertEqual(pago.monto, self.orden.total)
+
+    def test_no_permite_dos_pagos_pendientes_para_la_misma_orden(self):
+        payload = {
+            "orden_id": str(self.orden.id),
+            "pasarela": Pago.Pasarela.EFECTIVO,
+        }
+        primera = self.client.post(reverse("pago-crear"), payload, format="json")
+        segunda = self.client.post(reverse("pago-crear"), payload, format="json")
+
+        self.assertEqual(primera.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(segunda.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(Pago.objects.filter(orden=self.orden).count(), 1)
+
+    def test_usuario_no_puede_pagar_orden_de_otro_usuario(self):
+        self.client.force_authenticate(user=self.otro_usuario)
+
+        response = self.client.post(
+            reverse("pago-crear"),
+            {
+                "orden_id": str(self.orden.id),
+                "pasarela": Pago.Pasarela.EFECTIVO,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_no_lista_pagos_de_otro_usuario(self):
+        Pago.objects.create(
+            orden=self.orden,
+            pasarela=Pago.Pasarela.EFECTIVO,
+            monto=self.orden.total,
+            estado=Pago.Estado.PENDING,
+        )
+        self.client.force_authenticate(user=self.otro_usuario)
+
+        response = self.client.get(reverse("pago-list"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        resultados = response.data.get("resultados", response.data)
+        ids_ordenes = [
+            item["orden"] for item in resultados
+        ]
+
+        self.assertNotIn(str(self.orden.id), ids_ordenes)
