@@ -1,5 +1,3 @@
-from decimal import Decimal
-from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets, mixins, status, filters
@@ -29,23 +27,15 @@ class CuponViewSet(
     """
     ViewSet de cupones.
 
-    Endpoints públicos (usuarios autenticados):
-        GET  /api/cupones/                    - Listar cupones vigentes
-        GET  /api/cupones/{codigo}/           - Detalle de un cupón
-        POST /api/cupones/validar/            - Validar y calcular descuento
-
-    Endpoints de administración (solo staff):
-        GET  /api/cupones/admin/              - Listar todos los cupones
+    Endpoints para usuarios autenticados:
+        GET  /api/cupones/          - Listar cupones vigentes disponibles
+        GET  /api/cupones/{codigo}/ - Detalle de un cupón disponible
+        POST /api/cupones/validar/  - Validar y calcular descuento
 
     Seguridad:
-        - Usuarios normales solo ven cupones vigentes y activos.
-        - Solo admins ven cupones vencidos o inactivos.
-        - La validación verifica que el cupón sea aplicable
-          para el usuario y subtotal específicos.
-
-    Rendimiento:
-        lookup_field = "codigo" permite buscar por código
-        directamente sin necesitar el UUID.
+        - Usuarios normales solo ven cupones activos, vigentes y disponibles.
+        - Cupones restringidos solo aparecen al usuario asignado.
+        - Staff puede ver todos los cupones.
     """
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -56,20 +46,30 @@ class CuponViewSet(
 
     def get_queryset(self):
         """
-        Usuarios normales ven solo cupones vigentes y activos.
-        Admins ven todos los cupones sin filtro.
+        Retorna solo cupones visibles para el usuario autenticado.
         """
+        queryset = Cupon.objects.prefetch_related("usuarios_permitidos")
+
         if self.request.user.is_staff:
-            return Cupon.objects.all()
+            return queryset
 
         ahora = timezone.now()
-        return Cupon.objects.filter(
-        esta_activo=True,
-        fecha_inicio__lte=ahora,
-    ).filter(
-        Q(fecha_vencimiento__isnull=True) |
-        Q(fecha_vencimiento__gte=ahora)
-    )
+        return (
+            queryset
+            .filter(
+                esta_activo=True,
+                fecha_inicio__lte=ahora,
+            )
+            .filter(
+                Q(fecha_vencimiento__isnull=True) |
+                Q(fecha_vencimiento__gte=ahora)
+            )
+            .filter(
+                Q(usuarios_permitidos__isnull=True) |
+                Q(usuarios_permitidos=self.request.user)
+            )
+            .distinct()
+        )
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -91,28 +91,6 @@ class CuponViewSet(
     def validar(self, request) -> Response:
         """
         Valida un cupón y calcula el descuento para una orden.
-
-        Permite que el frontend muestre el descuento en tiempo real
-        antes de que el usuario confirme la compra.
-
-        POST /api/cupones/validar/
-        Body:
-            {
-                "codigo": "DESCUENTO10",
-                "subtotal": 500000
-            }
-
-        Response exitosa:
-            {
-                "codigo": "DESCUENTO10",
-                "tipo": "porcentaje",
-                "tipo_display": "Porcentaje (%)",
-                "valor": "10.00",
-                "subtotal_original": 500000,
-                "monto_descuento": 50000,
-                "total_con_descuento": 450000,
-                "mensaje": "Cupón aplicado exitosamente."
-            }
         """
         serializer = ValidarCuponSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -120,28 +98,22 @@ class CuponViewSet(
         codigo = serializer.validated_data["codigo"]
         subtotal = serializer.validated_data["subtotal"]
 
-        # Buscar el cupón
         try:
-            cupon = Cupon.objects.get(codigo=codigo)
+            cupon = Cupon.objects.prefetch_related("usuarios_permitidos").get(codigo=codigo)
         except Cupon.DoesNotExist:
             return Response(
-                {"detail": f"El cupón '{codigo}' no existe."},
+                {"detail": "El cupón ingresado no es válido."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Validar que el cupón sea aplicable
         try:
-            cupon.validar(
-                usuario=request.user,
-                subtotal=subtotal
-            )
+            cupon.validar(usuario=request.user, subtotal=subtotal)
         except CuponInvalido as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Calcular el descuento
         monto_descuento = cupon.calcular_descuento(subtotal)
         total_con_descuento = subtotal - monto_descuento
 
@@ -150,9 +122,9 @@ class CuponViewSet(
             "tipo": cupon.tipo,
             "tipo_display": cupon.get_tipo_display(),
             "valor": cupon.valor,
-            "subtotal_original": (subtotal),
-            "monto_descuento": (monto_descuento),
-            "total_con_descuento": (total_con_descuento),
+            "subtotal_original": subtotal,
+            "monto_descuento": monto_descuento,
+            "total_con_descuento": total_con_descuento,
             "mensaje": "Cupón aplicado exitosamente. ¡Aprovechá tu descuento!",
         })
 

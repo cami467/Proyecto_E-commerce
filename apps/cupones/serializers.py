@@ -1,5 +1,4 @@
 from decimal import Decimal
-from django.utils import timezone
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 
@@ -16,10 +15,7 @@ class CuponListSerializer(serializers.ModelSerializer):
     Solo expone los campos necesarios para que el frontend
     muestre la lista sin cargar datos innecesarios.
     """
-    tipo_display = serializers.CharField(
-        source="get_tipo_display",
-        read_only=True
-    )
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
     esta_vigente = serializers.BooleanField(read_only=True)
     usos_restantes = serializers.SerializerMethodField()
 
@@ -62,10 +58,7 @@ class CuponSerializer(serializers.ModelSerializer):
     Serializer completo para el detalle de un cupón.
     Incluye todos los campos incluyendo usuarios permitidos.
     """
-    tipo_display = serializers.CharField(
-        source="get_tipo_display",
-        read_only=True
-    )
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
     esta_vigente = serializers.BooleanField(read_only=True)
     tiene_usos_disponibles = serializers.BooleanField(read_only=True)
     usos_restantes = serializers.SerializerMethodField()
@@ -113,35 +106,32 @@ class CuponSerializer(serializers.ModelSerializer):
 class ValidarCuponSerializer(serializers.Serializer):
     """
     Serializer para validar un cupón antes de aplicarlo a una orden.
-
-    El frontend envía el código y el subtotal de la orden.
-    La API responde con el monto de descuento calculado.
-
-    Esto permite que el frontend muestre el descuento en tiempo real
-    antes de que el usuario confirme la compra.
     """
     codigo = serializers.CharField(
         max_length=50,
+        trim_whitespace=True,
         help_text="Código del cupón a validar."
     )
     subtotal = serializers.DecimalField(
         max_digits=12,
         decimal_places=0,
-        min_value=Decimal("0"),
+        min_value=Decimal("1"),
         help_text="Subtotal de la orden en Guaraníes."
     )
 
     def validate_codigo(self, value: str) -> str:
-        """Normaliza el código a mayúsculas."""
-        return value.strip().upper()
+        """Normaliza y valida el código recibido desde el frontend."""
+        codigo = Cupon.normalizar_codigo(value)
+        if not Cupon.CODIGO_REGEX.match(codigo):
+            raise serializers.ValidationError(
+                "El código del cupón tiene un formato inválido."
+            )
+        return codigo
 
 
 class CuponAplicadoSerializer(serializers.Serializer):
     """
     Serializer de respuesta al validar un cupón exitosamente.
-
-    Retorna el descuento calculado y el total final
-    para que el frontend pueda mostrarlo al usuario.
     """
     codigo = serializers.CharField()
     tipo = serializers.CharField()
@@ -157,10 +147,9 @@ class CuponAplicadoSerializer(serializers.Serializer):
     def to_representation(self, instance: dict) -> dict:
         """
         Si el cupón es de monto fijo, muestra 'valor' como entero
-        sin decimales (ej: 50000 en lugar de 50000.00), porque
-        representa Guaraníes, no un porcentaje.
+        sin decimales porque representa Guaraníes.
         """
         data = super().to_representation(instance)
-        if instance.get("tipo") == "monto_fijo":
+        if instance.get("tipo") == Cupon.TipoDescuento.MONTO_FIJO:
             data["valor"] = int(instance.get("valor", 0))
         return data

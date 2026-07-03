@@ -1,7 +1,12 @@
 from decimal import Decimal
+import re
+
 from django.conf import settings
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.db.models import F, Q
 from django.utils import timezone
+
 from core.models import ModeloBase
 from core.exceptions import CuponInvalido
 
@@ -22,9 +27,11 @@ class Cupon(ModeloBase):
         - Si tiene usuarios asignados, solo ellos pueden usarlo.
     """
 
+    CODIGO_REGEX = re.compile(r"^[A-Z0-9_-]{3,50}$")
+
     class TipoDescuento(models.TextChoices):
-        PORCENTAJE  = "porcentaje",  "Porcentaje (%)"
-        MONTO_FIJO  = "monto_fijo",  "Monto fijo (Gs.)"
+        PORCENTAJE = "porcentaje", "Porcentaje (%)"
+        MONTO_FIJO = "monto_fijo", "Monto fijo (Gs.)"
 
     codigo = models.CharField(
         max_length=50,
@@ -87,14 +94,76 @@ class Cupon(ModeloBase):
         verbose_name = "Cupón"
         verbose_name_plural = "Cupones"
         ordering = ["-fecha_creacion"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(valor__gt=0),
+                name="cupon_valor_positivo",
+            ),
+            models.CheckConstraint(
+                condition=Q(monto_minimo__gte=0),
+                name="cupon_monto_minimo_no_negativo",
+            ),
+            models.CheckConstraint(
+                condition=Q(limite_usos__isnull=True) | Q(limite_usos__gt=0),
+                name="cupon_limite_usos_positivo_o_nulo",
+            ),
+            models.CheckConstraint(
+                condition=Q(tipo="monto_fijo") | Q(valor__lte=100),
+                name="cupon_porcentaje_maximo_100",
+            ),
+            models.CheckConstraint(
+                condition=Q(fecha_vencimiento__isnull=True) | Q(fecha_vencimiento__gt=F("fecha_inicio")),
+                name="cupon_vencimiento_posterior_inicio",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.codigo} — {self.get_tipo_display()} {self.valor}"
 
+    def clean(self):
+        """Valida reglas de negocio que no dependen de la base de datos."""
+        super().clean()
+        self.codigo = self.normalizar_codigo(self.codigo)
+
+        errores = {}
+
+        if not self.CODIGO_REGEX.match(self.codigo):
+            errores["codigo"] = (
+                "El código debe tener entre 3 y 50 caracteres y solo puede "
+                "contener letras, números, guion medio o guion bajo."
+            )
+
+        if self.valor <= 0:
+            errores["valor"] = "El valor del descuento debe ser mayor a cero."
+
+        if self.tipo == self.TipoDescuento.PORCENTAJE and self.valor > 100:
+            errores["valor"] = "El descuento porcentual no puede superar el 100%."
+
+        if self.monto_minimo < 0:
+            errores["monto_minimo"] = "El monto mínimo no puede ser negativo."
+
+        if self.limite_usos is not None and self.limite_usos <= 0:
+            errores["limite_usos"] = "El límite de usos debe ser mayor a cero o quedar vacío."
+
+        if self.limite_usos is not None and self.usos_actuales > self.limite_usos:
+            errores["usos_actuales"] = "Los usos actuales no pueden superar el límite de usos."
+
+        if self.fecha_vencimiento and self.fecha_vencimiento <= self.fecha_inicio:
+            errores["fecha_vencimiento"] = "La fecha de vencimiento debe ser posterior a la fecha de inicio."
+
+        if errores:
+            raise ValidationError(errores)
+
     def save(self, *args, **kwargs):
-        """Normaliza el código a mayúsculas antes de guardar."""
-        self.codigo = self.codigo.strip().upper()
+        """Normaliza y valida el cupón antes de guardar."""
+        self.codigo = self.normalizar_codigo(self.codigo)
+        self.full_clean()
         super().save(*args, **kwargs)
+
+    @classmethod
+    def normalizar_codigo(cls, codigo: str) -> str:
+        """Normaliza el código del cupón para búsquedas consistentes."""
+        return (codigo or "").strip().upper()
 
     # ------------------------------------------------------------------
     # PROPIEDADES DE ESTADO
@@ -136,6 +205,10 @@ class Cupon(ModeloBase):
         Para monto fijo: nunca supera el subtotal.
         Siempre retorna un valor positivo en Guaraníes.
         """
+        subtotal = Decimal(subtotal)
+        if subtotal <= 0:
+            return Decimal("0")
+
         if self.tipo == self.TipoDescuento.PORCENTAJE:
             descuento = subtotal * (self.valor / Decimal("100"))
         else:
@@ -146,17 +219,9 @@ class Cupon(ModeloBase):
     def validar(self, usuario, subtotal: Decimal) -> None:
         """
         Valida que el cupón sea aplicable para el usuario y subtotal dados.
-
-        Lanza CuponInvalido con mensaje descriptivo si alguna
-        regla de negocio no se cumple.
-
-        Args:
-            usuario: instancia del usuario que intenta usar el cupón.
-            subtotal: monto de la orden antes del descuento en Gs.
-
-        Raises:
-            CuponInvalido: si el cupón no es aplicable.
         """
+        subtotal = Decimal(subtotal)
+
         if not self.esta_activo:
             raise CuponInvalido("El cupón no está activo.")
 
@@ -173,16 +238,25 @@ class Cupon(ModeloBase):
                 f"Tu orden es de Gs. {int(subtotal):,.0f}."
             )
 
-        permitidos = self.usuarios_permitidos.all()
-        if permitidos.exists() and usuario not in permitidos:
-            raise CuponInvalido(
-                "Este cupón no está disponible para tu cuenta."
-            )
+        if self.usuarios_permitidos.exists() and not self.usuarios_permitidos.filter(pk=usuario.pk).exists():
+            raise CuponInvalido("Este cupón no está disponible para tu cuenta.")
 
     def incrementar_uso(self) -> None:
         """
-        Incrementa el contador de usos de forma segura.
-        Usa update_fields para optimizar la query.
+        Incrementa el contador de usos de forma atómica.
+
+        Este método evita condiciones de carrera cuando varias órdenes intentan
+        consumir el mismo cupón al mismo tiempo.
         """
-        self.usos_actuales += 1
-        self.save(update_fields=["usos_actuales", "fecha_actualizacion"])
+        with transaction.atomic():
+            cupon = Cupon.objects.select_for_update().get(pk=self.pk)
+
+            if cupon.limite_usos is not None and cupon.usos_actuales >= cupon.limite_usos:
+                raise CuponInvalido("El cupón alcanzó su límite de usos.")
+
+            Cupon.objects.filter(pk=cupon.pk).update(
+                usos_actuales=F("usos_actuales") + 1,
+                fecha_actualizacion=timezone.now(),
+            )
+
+        self.refresh_from_db(fields=["usos_actuales", "fecha_actualizacion"])

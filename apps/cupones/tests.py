@@ -183,3 +183,128 @@ class CuponModelTestCase(TestCase):
 
         # No debe lanzar excepcion
         cupon.validar(usuario=self.usuario, subtotal=Decimal("100000"))
+
+from django.core.exceptions import ValidationError
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+
+class CuponReglasProduccionTestCase(TestCase):
+    """Pruebas de reglas de negocio adicionales para producción."""
+
+    def setUp(self):
+        self.ahora = timezone.now()
+
+    def _crear_cupon(self, **overrides):
+        defaults = {
+            "codigo": "PROD10",
+            "tipo": Cupon.TipoDescuento.PORCENTAJE,
+            "valor": Decimal("10"),
+            "monto_minimo": Decimal("0"),
+            "limite_usos": 10,
+            "fecha_inicio": self.ahora - timedelta(days=1),
+            "fecha_vencimiento": self.ahora + timedelta(days=10),
+            "esta_activo": True,
+        }
+        defaults.update(overrides)
+        return Cupon.objects.create(**defaults)
+
+    def test_rechaza_codigo_con_formato_invalido(self):
+        with self.assertRaises(ValidationError):
+            self._crear_cupon(codigo="promo raro!!!")
+
+    def test_rechaza_porcentaje_mayor_a_100(self):
+        with self.assertRaises(ValidationError):
+            self._crear_cupon(valor=Decimal("101"))
+
+    def test_rechaza_fecha_vencimiento_anterior_a_inicio(self):
+        with self.assertRaises(ValidationError):
+            self._crear_cupon(
+                fecha_inicio=self.ahora + timedelta(days=5),
+                fecha_vencimiento=self.ahora + timedelta(days=1),
+            )
+
+    def test_incrementar_uso_no_supera_limite(self):
+        cupon = self._crear_cupon(limite_usos=1, usos_actuales=1)
+        with self.assertRaises(CuponInvalido):
+            cupon.incrementar_uso()
+
+
+class CuponAPITestCase(APITestCase):
+    """Pruebas de API para visibilidad y validación de cupones."""
+
+    def setUp(self):
+        self.usuario = Usuario.objects.create_user(
+            username="cliente_api_cupon",
+            email="cliente_api_cupon@tienda.com",
+            password="Password123!"
+        )
+        self.otro_usuario = Usuario.objects.create_user(
+            username="otro_cliente_api_cupon",
+            email="otro_cliente_api_cupon@tienda.com",
+            password="Password123!"
+        )
+        self.client.force_authenticate(user=self.usuario)
+        self.ahora = timezone.now()
+
+    def _crear_cupon(self, **overrides):
+        defaults = {
+            "codigo": "API10",
+            "tipo": Cupon.TipoDescuento.PORCENTAJE,
+            "valor": Decimal("10"),
+            "monto_minimo": Decimal("0"),
+            "limite_usos": 100,
+            "fecha_inicio": self.ahora - timedelta(days=1),
+            "fecha_vencimiento": self.ahora + timedelta(days=10),
+            "esta_activo": True,
+        }
+        defaults.update(overrides)
+        return Cupon.objects.create(**defaults)
+
+    def test_lista_no_muestra_cupon_restringido_a_otro_usuario(self):
+        cupon_publico = self._crear_cupon(codigo="PUBLICO10")
+        cupon_restringido = self._crear_cupon(codigo="PRIVADO10")
+        cupon_restringido.usuarios_permitidos.add(self.otro_usuario)
+
+        response = self.client.get(reverse("cupon-list"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        resultados = response.data.get("resultados", response.data)
+        codigos = {item["codigo"] for item in resultados}
+        self.assertIn(cupon_publico.codigo, codigos)
+        self.assertNotIn(cupon_restringido.codigo, codigos)
+
+    def test_validar_normaliza_codigo_y_calcula_descuento(self):
+        self._crear_cupon(codigo="PROMO10")
+
+        response = self.client.post(
+            reverse("cupon-validar"),
+            {"codigo": " promo10 ", "subtotal": 100000},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["codigo"], "PROMO10")
+        self.assertEqual(response.data["monto_descuento"], Decimal("10000"))
+
+    def test_validar_rechaza_codigo_con_formato_invalido(self):
+        response = self.client.post(
+            reverse("cupon-validar"),
+            {"codigo": "@@@", "subtotal": 100000},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_validar_rechaza_cupon_restringido_a_otro_usuario(self):
+        cupon = self._crear_cupon(codigo="SOLOOTRO")
+        cupon.usuarios_permitidos.add(self.otro_usuario)
+
+        response = self.client.post(
+            reverse("cupon-validar"),
+            {"codigo": "SOLOOTRO", "subtotal": 100000},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
