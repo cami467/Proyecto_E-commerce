@@ -235,3 +235,61 @@ class OrdenModelTestCase(TestCase):
 
         self.assertTrue(orden.numero_orden_display.startswith("#"))
         self.assertEqual(len(orden.numero_orden_display), 9)  # "#" + 8 caracteres
+
+class OrdenReglasNegocioTestCase(TestCase):
+    """Pruebas de reglas de negocio adicionales para crear órdenes."""
+
+    def setUp(self):
+        self.usuario = Usuario.objects.create_user(
+            username="orden_reglas",
+            email="orden_reglas@tienda.com",
+            password="Password123!"
+        )
+        self.categoria = Categoria.objects.create(nombre="Accesorios Orden")
+        self.producto = Producto.objects.create(
+            nombre="Auricular Orden",
+            categoria=self.categoria,
+            precio_base=Decimal("100000"),
+            esta_activo=True,
+        )
+        self.variante = Variante.objects.create(
+            producto=self.producto,
+            nombre="Negro",
+            sku="ORDEN-AURICULAR-NEGRO",
+            inventario=5,
+            stock_minimo=1,
+            esta_activo=True,
+        )
+        self.carrito = Carrito.objects.create(usuario=self.usuario)
+
+    def test_no_crea_orden_con_descuento_mayor_al_subtotal(self):
+        ItemCarrito.objects.create(
+            carrito=self.carrito,
+            variante=self.variante,
+            cantidad=1,
+        )
+
+        with self.assertRaises(ValueError):
+            crear_orden_desde_carrito(
+                usuario=self.usuario,
+                monto_descuento=Decimal("999999"),
+            )
+
+        self.variante.refresh_from_db()
+        self.assertEqual(self.variante.inventario, 5)
+        self.assertEqual(Orden.objects.count(), 0)
+
+    def test_no_crea_orden_con_variante_inactiva(self):
+        self.variante.esta_activo = False
+        self.variante.save(update_fields=["esta_activo"])
+
+        ItemCarrito.objects.create(
+            carrito=self.carrito,
+            variante=self.variante,
+            cantidad=1,
+        )
+
+        with self.assertRaises(ValueError):
+            crear_orden_desde_carrito(usuario=self.usuario)
+
+        self.assertEqual(Orden.objects.count(), 0)

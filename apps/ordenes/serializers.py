@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 # CONSTANTES DE NEGOCIO
 # ==============================================================================
 
-MAX_COSTO_ENVIO = Decimal("9_999_999")
+MAX_COSTO_ENVIO = Decimal("9999999")
 """
 Tope máximo del costo de envío en Guaraníes.
 Evita que un error en el frontend envíe valores fuera de rango

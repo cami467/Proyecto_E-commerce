@@ -1,4 +1,5 @@
 from decimal import Decimal
+#from django.db.models import Q
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
@@ -92,6 +93,24 @@ class Orden(ModeloBase):
         indexes = [
             models.Index(fields=["usuario", "estado"]),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(subtotal__gte=0),
+                name="orden_subtotal_no_negativo",
+            ),
+            models.CheckConstraint(
+                 condition=models.Q(monto_descuento__gte=0),
+                name="orden_descuento_no_negativo",
+            ),
+            models.CheckConstraint(
+                 condition=models.Q(costo_envio__gte=0),
+                name="orden_envio_no_negativo",
+            ),
+            models.CheckConstraint(
+                 condition=models.Q(total__gte=0),
+                name="orden_total_no_negativo",
+            ),
+        ]
 
     def __str__(self):
         identificador = str(self.id)[:8] if self.id else "Nueva"
@@ -179,6 +198,14 @@ class Orden(ModeloBase):
         Crea una orden desde el carrito del usuario.
         Usa bulk_create para insertar todos los items en una sola query.
         """
+        costo_envio = Decimal(str(costo_envio or 0))
+        monto_descuento = Decimal(str(monto_descuento or 0))
+
+        if costo_envio < 0:
+            raise ValueError("El costo de envío no puede ser negativo.")
+        if monto_descuento < 0:
+            raise ValueError("El descuento no puede ser negativo.")
+
         with transaction.atomic():
             items_carrito = list(
                 carrito.items
@@ -190,8 +217,16 @@ class Orden(ModeloBase):
             if not items_carrito:
                 raise CarritoVacio("El carrito no contiene productos.")
 
-            # Validar stock de todos los items
+            # Validar reglas de negocio de todos los items antes de tocar stock.
             for item in items_carrito:
+                if item.cantidad <= 0:
+                    raise ValueError("La cantidad de cada ítem debe ser mayor a cero.")
+
+                if not item.variante.esta_activo or not item.variante.producto.esta_activo:
+                    raise ValueError(
+                        f"La variante '{item.variante.nombre}' ya no está disponible para compra."
+                    )
+
                 if item.variante.inventario < item.cantidad:
                     raise StockInsuficiente(
                         producto=item.variante.nombre,
@@ -203,7 +238,10 @@ class Orden(ModeloBase):
                 item.variante.precio_total * item.cantidad
                 for item in items_carrito
             )
-            total = subtotal - Decimal(str(monto_descuento)) + Decimal(str(costo_envio))
+            if monto_descuento > subtotal:
+                raise ValueError("El descuento no puede superar el subtotal de la orden.")
+
+            total = subtotal - monto_descuento + costo_envio
 
             # Crear la orden
             orden = cls.objects.create(
@@ -308,6 +346,16 @@ class ItemOrden(ModeloBase):
         verbose_name = "Item de Orden"
         verbose_name_plural = "Items de Orden"
         ordering = ["fecha_creacion"]
+        constraints = [
+            models.CheckConstraint(
+                 condition=models.Q(cantidad__gt=0),
+                name="item_orden_cantidad_positiva",
+            ),
+            models.CheckConstraint(
+                 condition=models.Q(precio_unitario__gte=0),
+                name="item_orden_precio_no_negativo",
+            ),
+        ]
 
     def __str__(self):
         identificador = str(self.orden.id)[:8] if self.orden_id else "S/O"

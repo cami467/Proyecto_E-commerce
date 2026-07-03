@@ -5,6 +5,7 @@ from rest_framework import viewsets, mixins, status, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.db import transaction
 from django.db.models import Prefetch
 from django.http import HttpResponse
 from .factura import generar_factura_pdf
@@ -12,7 +13,7 @@ from django.http import Http404
 
 from core.exceptions import CarritoVacio, StockInsuficiente, CuponInvalido
 from apps.cupones.models import Cupon
-from .models import Orden, ItemOrden, HistorialEstadoOrden
+from .models import Orden, ItemOrden, HistorialEstadoOrden, OrdenNoCancelable
 from .serializers import (
     OrdenSerializer,
     OrdenListSerializer,
@@ -232,15 +233,20 @@ class OrdenViewSet(
 
             monto_descuento = cupon.calcular_descuento(subtotal_actual)
 
-        # Esto se ejecuta SIEMPRE, haya o no cupón.
         try:
-            orden = crear_orden_desde_carrito(
-                usuario=request.user,
-                costo_envio=costo_envio,
-                monto_descuento=monto_descuento,
-                codigo_cupon=codigo_cupon,
-                notas=notas,
-            )
+            with transaction.atomic():
+                orden = crear_orden_desde_carrito(
+                    usuario=request.user,
+                    costo_envio=costo_envio,
+                    monto_descuento=monto_descuento,
+                    codigo_cupon=codigo_cupon,
+                    notas=notas,
+                )
+
+                # El uso del cupón solo se incrementa si la orden se creó correctamente.
+                # Al estar dentro de la misma transacción, si falla el commit se revierte todo.
+                if cupon is not None:
+                    cupon.incrementar_uso()
         except CarritoVacio as exc:
             return Response(
                 {"detail": str(exc)},
@@ -251,10 +257,11 @@ class OrdenViewSet(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        # Solo incrementamos el uso si efectivamente se usó un cupón válido.
-        if cupon is not None:
-            cupon.incrementar_uso()
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         orden_completa = self._obtener_orden_completa(orden.pk)
 
@@ -309,7 +316,7 @@ class OrdenViewSet(
                 usuario_accion=request.user,
                 comentario=serializer.validated_data["comentario"]
             )
-        except Exception as exc:
+        except OrdenNoCancelable as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
@@ -347,11 +354,16 @@ class OrdenViewSet(
             orden = self.get_object()
         except Http404:
             return Response(
-            {"detail": "La orden no existe o no te pertenece."},
-            status=status.HTTP_404_NOT_FOUND
-        )
+                {"detail": "La orden no existe o no te pertenece."},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        estados_facturables = ["confirmed", "processing", "shipped", "delivered"]
+        estados_facturables = [
+            Orden.Estado.CONFIRMED,
+            Orden.Estado.PROCESSING,
+            Orden.Estado.SHIPPED,
+            Orden.Estado.DELIVERED,
+        ]
         if orden.estado not in estados_facturables:
             return Response(
                 {
