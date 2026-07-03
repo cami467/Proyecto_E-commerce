@@ -1,8 +1,15 @@
 from .base import *
+from .base import config as csv_config
+from decouple import Csv
 
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
 
-# En desarrollo permitimos todos los origenes
-CORS_ALLOW_ALL_ORIGINS = True
+# En desarrollo permitimos el frontend local.
+CORS_ALLOWED_ORIGINS = csv_config(
+    "CORS_ALLOWED_ORIGINS",
+    default="http://localhost:5173,http://127.0.0.1:5173",
+    cast=Csv()
+)
+CORS_ALLOW_ALL_ORIGINS = False
