@@ -28,6 +28,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",             # Django REST Framework
     "rest_framework_simplejwt",   # Autenticación con JWT
+    "rest_framework_simplejwt.token_blacklist",   # Lista negra de tokens JWT
     "django_filters",             # Filtros en consultas
     "drf_spectacular",            # Documentación automática de la API
     "corsheaders",                # Manejo de cabeceras CORS
@@ -141,6 +142,14 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated", # Requiere login por defecto
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        # Protege el login contra intentos repetidos de fuerza bruta por IP.
+        # En producción puede ajustarse según monitoreo real.
+        "login": "5/minute",
+    },
     "DEFAULT_PAGINATION_CLASS": "core.pagination.PaginacionEstandar", # Paginación personalizada
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema", # Documentación automática
@@ -180,7 +189,7 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),   # Duración del token de acceso
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),   # Duración del token de refresco
     "ROTATE_REFRESH_TOKENS": True,                 # Rotar tokens de refresco
-    "BLACKLIST_AFTER_ROTATION": False,             # No invalidar tokens antiguos
+    "BLACKLIST_AFTER_ROTATION": True,             # No invalidar tokens antiguos
     "AUTH_HEADER_TYPES": ("Bearer",),              # Tipo de encabezado
 }
 

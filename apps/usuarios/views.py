@@ -1,6 +1,7 @@
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import TokenError
@@ -45,8 +46,13 @@ class LoginEmailView(TokenObtainPairView):
     Endpoint para iniciar sesión con email y password.
     No requiere autenticación.
     POST /api/token/
+
+    Usa throttling para limitar intentos repetidos desde la misma IP.
+    Esto reduce el riesgo de ataques de fuerza bruta sobre contraseñas.
     """
     serializer_class = EmailTokenObtainPairSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
 class PerfilView(generics.RetrieveUpdateAPIView):
     """

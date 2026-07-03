@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -157,6 +157,47 @@ class AutenticacionAPITestCase(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "DEFAULT_AUTHENTICATION_CLASSES": [
+                "rest_framework_simplejwt.authentication.JWTAuthentication",
+            ],
+            "DEFAULT_PERMISSION_CLASSES": [
+                "rest_framework.permissions.IsAuthenticated",
+            ],
+            "DEFAULT_THROTTLE_CLASSES": [
+                "rest_framework.throttling.ScopedRateThrottle",
+            ],
+            "DEFAULT_THROTTLE_RATES": {
+                "login": "3/minute",
+            },
+        },
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "test-login-throttle",
+            }
+        },
+    )
+    def test_login_limita_intentos_repetidos(self):
+        """El login debe limitar intentos repetidos para mitigar fuerza bruta."""
+        from django.core.cache import cache
+        cache.clear()  # Asegura que no arrastre conteos de otros tests
+
+        for _ in range(5):
+            response = self.client.post(reverse("token_obtain_pair"), {
+                "email": "usuario_login_test@tienda.com",
+                "password": "PasswordIncorrecta",
+            })
+            self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        response = self.client.post(reverse("token_obtain_pair"), {
+            "email": "usuario_login_test@tienda.com",
+            "password": "PasswordIncorrecta",
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
     def test_acceder_a_perfil_sin_token_falla(self):
         """Acceder al perfil sin autenticacion retorna 401."""
         response = self.client.get(reverse("perfil"))
