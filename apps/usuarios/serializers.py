@@ -23,6 +23,17 @@ def normalizar_espacios(value):
     """Elimina espacios innecesarios y compacta espacios internos."""
     return re.sub(r"\s+", " ", value.strip())
 
+def normalizar_nombre(valor):
+    valor = " ".join(valor.strip().split())
+
+    patron = r"^[A-Za-zÁÉÍÓÚáéíóúÑñÜü' -]+$"
+
+    if not re.match(patron, valor):
+        raise serializers.ValidationError(
+            "El nombre solo puede contener letras, espacios, guiones o apóstrofes."
+        )
+
+    return valor
 
 def validar_nombre_persona(value, nombre_campo):
     """
@@ -167,15 +178,12 @@ class RegistroSerializer(serializers.ModelSerializer):
             "password2",
             "telefono",
         ]  
-    
     def validate_first_name(self, value):
-        """Valida y normaliza el nombre del cliente."""
-        return validar_nombre_persona(value, "El nombre")
+        return normalizar_nombre(value)
 
     def validate_last_name(self, value):
-        """Valida y normaliza el apellido del cliente."""
-        return validar_nombre_persona(value, "El apellido") 
-        
+        return normalizar_nombre(value)
+    
     def validate_username(self, value):
         """Valida un nombre de usuario seguro y consistente."""
         value = value.strip()
@@ -308,7 +316,6 @@ class UsuarioSerializer(serializers.ModelSerializer):
         model = Usuario
         fields = [
             "id",
-            "username",
             "email",
             "first_name",
             "last_name",
@@ -317,16 +324,22 @@ class UsuarioSerializer(serializers.ModelSerializer):
             "avatar",
             "date_joined",
         ]
-        read_only_fields = ["id","username", "date_joined"]
+        read_only_fields = ["id", "date_joined"]
+        
+    def validate_first_name(self, value):
+        return normalizar_nombre(value)
+
+    def validate_last_name(self, value):
+        return normalizar_nombre(value)
 
     @extend_schema_field(drf_serializers.CharField(allow_null=True))
     def get_nombre_completo(self, obj):
         """
         Genera nombre completo dinamicamente.
-        Usa username como fallback si no hay nombre.
+        No expone username porque es un dato interno del backend.
         """
         nombre = f"{obj.first_name} {obj.last_name}".strip()
-        return nombre if nombre else obj.username
+        return nombre if nombre else None
 
     def validate_email(self, value):
         """

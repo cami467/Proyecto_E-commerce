@@ -148,6 +148,7 @@ class AutenticacionAPITestCase(APITestCase):
         self.assertIn("refresh", response.data)
         self.assertIn("usuario", response.data)
         self.assertEqual(response.data["usuario"]["email"], "usuario_login_test@tienda.com")
+        self.assertNotIn("username", response.data["usuario"])
 
     def test_login_con_password_incorrecta_falla(self):
         """Login con password incorrecta retorna 401."""
@@ -236,7 +237,8 @@ class AutenticacionAPITestCase(APITestCase):
         response = self.client.get(reverse("perfil"))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["username"], "usuario_login_test")
+        self.assertEqual(response.data["email"], "usuario_login_test@tienda.com")
+        self.assertNotIn("username", response.data)
         
     def test_registro_sin_username_genera_username_interno(self):
         """El registro publico no debe obligar al cliente a elegir username."""
