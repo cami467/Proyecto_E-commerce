@@ -13,13 +13,15 @@ from apps.productos.serializers import VarianteListSerializer
 class ItemCarritoSerializer(serializers.ModelSerializer):
     """
     Serializer completo de ItemCarrito.
-    Incluye datos de la variante y el subtotal calculado.
+    Incluye datos de la variante, la imagen principal del producto
+    y el subtotal calculado.
     """
     variante_detalle = VarianteListSerializer(
         source="variante",
         read_only=True
     )
     subtotal = serializers.SerializerMethodField()
+    imagen_producto = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemCarrito
@@ -27,6 +29,7 @@ class ItemCarritoSerializer(serializers.ModelSerializer):
             "id",
             "variante",
             "variante_detalle",
+            "imagen_producto",
             "cantidad",
             "subtotal",
             "esta_activo",
@@ -35,6 +38,7 @@ class ItemCarritoSerializer(serializers.ModelSerializer):
             "id",
             "variante",
             "variante_detalle",
+            "imagen_producto",
             "subtotal",
             "esta_activo",
         ]
@@ -43,6 +47,36 @@ class ItemCarritoSerializer(serializers.ModelSerializer):
     def get_subtotal(self, obj):
         """Retorna el subtotal del item en Guaranies."""
         return int(obj.subtotal)
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_imagen_producto(self, obj):
+        """
+        Retorna la URL absoluta de la imagen principal del producto
+        asociado a la variante de este item. Si no hay ninguna imagen
+        marcada como principal, usa la primera disponible. Requiere que
+        la vista use prefetch_related("variante__producto__imagenes")
+        para no generar una consulta extra por cada item (N+1).
+        """
+        imagenes = list(obj.variante.producto.imagenes.all())
+        if not imagenes:
+            return None
+
+        principal = next(
+            (img for img in imagenes if img.es_principal),
+            imagenes[0],
+        )
+
+        if not principal.imagen or not hasattr(principal.imagen, "url"):
+            return None
+
+        request = self.context.get("request")
+        if not request:
+            return None
+
+        try:
+            return request.build_absolute_uri(principal.imagen.url)
+        except ValueError:
+            return None
 
     def validate_cantidad(self, value):
         """La cantidad debe ser mayor a cero."""
@@ -148,12 +182,16 @@ class CarritoSerializer(serializers.ModelSerializer):
     def get_items(self, obj):
         """
         Retorna unicamente los items activos del carrito.
-        Usa select_related para evitar N+1 queries.
+        Usa select_related/prefetch_related para evitar N+1 queries,
+        incluyendo las imagenes del producto que necesita
+        ItemCarritoSerializer.get_imagen_producto().
         """
         items_activos = obj.items.filter(
             esta_activo=True,
             variante__esta_activo=True,
-        ).select_related("variante__producto")
+        ).select_related("variante__producto").prefetch_related(
+            "variante__producto__imagenes"
+        )
         return ItemCarritoSerializer(
             items_activos,
             many=True,
