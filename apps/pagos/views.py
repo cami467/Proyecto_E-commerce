@@ -71,7 +71,7 @@ class PagoViewSet(
         GET  /api/pagos/              - Listar mis pagos
         GET  /api/pagos/{id}/         - Detalle de un pago
         POST /api/pagos/crear/        - Iniciar un pago
-        POST /api/pagos/simular_pago/      - Simular pago (solo DEBUG)
+        POST /api/pagos/simular/      - Simular pago (solo DEBUG)
 
     Seguridad:
         - Solo se retornan pagos de órdenes del usuario autenticado.
@@ -229,7 +229,7 @@ class PagoViewSet(
         summary="Simular pasarela de pagos (Solo DEBUG)",
         description="Permite simular la aprobación o rechazo de una pasarela externa. Requiere DEBUG=True.",
     )
-    @action(detail=False, methods=["post"], url_path="simular_pago")
+    @action(detail=False, methods=["post"], url_path="simular")
     def simular(self, request) -> Response:
         """
         Simula el resultado de un pago para desarrollo y testing.
