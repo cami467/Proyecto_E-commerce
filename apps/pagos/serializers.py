@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,19 @@ Tope máximo de un pago en Guaraníes.
 Previene errores de datos fuera de rango que pasarían
 la validación de tipo pero no tienen sentido de negocio.
 """
+
+
+def _generar_id_transaccion_simulado() -> str:
+    """
+    Genera un id_transaccion único para pagos simulados.
+
+    IMPORTANTE: no usar un valor fijo acá (ej: "SIM-TEST-001").
+    El modelo Pago tiene una UniqueConstraint sobre
+    (pasarela, id_transaccion), así que un valor fijo hace que la
+    segunda simulación con la misma pasarela rompa con un 500
+    ("No se cumple la restricción transaccion_unica_por_pasarela").
+    """
+    return f"SIM-{uuid.uuid4().hex[:12].upper()}"
 
 
 # ==============================================================================
@@ -279,11 +293,15 @@ class SimularPagoSerializer(serializers.Serializer):
     )
     id_transaccion = serializers.CharField(
         required=False,
-        default="SIM-TEST-001",
+        default=_generar_id_transaccion_simulado,
         max_length=255,
-        help_text="ID de transacción simulado para testing."
+        help_text=(
+            "ID de transacción simulado para testing. Si no se envía, "
+            "se genera uno único automáticamente para no chocar con la "
+            "restricción de unicidad (pasarela, id_transaccion)."
+        )
     )
 
     def validate_id_transaccion(self, value: str) -> str:
         """Normaliza el ID de transacción simulado."""
-        return value.strip().upper() if value else "SIM-TEST-001"
+        return value.strip().upper() if value else _generar_id_transaccion_simulado()
