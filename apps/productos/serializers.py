@@ -305,6 +305,7 @@ class ProductoListSerializer(serializers.ModelSerializer):
         decimal_places=0,
         read_only=True,
     )
+    variante_unica_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Producto
@@ -321,6 +322,7 @@ class ProductoListSerializer(serializers.ModelSerializer):
             "imagen_principal",
             "es_destacado",
             "esta_activo",
+            "variante_unica_id",
         ]
         read_only_fields = ["id", "slug"]
 
@@ -343,6 +345,18 @@ class ProductoListSerializer(serializers.ModelSerializer):
                     return request.build_absolute_uri(principal.imagen.url)
                 except ValueError:
                     pass
+        return None
+    
+    @extend_schema_field(drf_serializers.CharField(allow_null=True))
+    def get_variante_unica_id(self, obj):
+        """
+        Devuelve el id (como string) de la variante si el producto
+        tiene exactamente una variante activa. Si tiene 0 o mas de una,
+        devuelve None y el frontend debe llevar al detalle para elegir.
+        """
+        variantes_activas = [v for v in obj.variantes.all() if v.esta_activo]
+        if len(variantes_activas) == 1:
+            return str(variantes_activas[0].id)
         return None
 
 
@@ -479,3 +493,6 @@ class ProductoWriteSerializer(serializers.ModelSerializer):
                     "nombre": "Ya existe un producto con este nombre en esta categoria."
                 })
         return data
+    
+    
+    

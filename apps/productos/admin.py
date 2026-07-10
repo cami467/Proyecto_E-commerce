@@ -202,6 +202,17 @@ class ProductoAdmin(admin.ModelAdmin):
         )
 
     def precio_final(self, obj):
+        """
+        Muestra el precio final calculado.
+        Protegido contra objetos sin guardar o sin precio_base todavia
+        (por ejemplo, el formulario vacio de "agregar producto" que Django
+        arma en memoria para renderizar los campos de solo lectura antes
+        de que el usuario haya cargado ningun dato).
+        """
+        if obj.pk is None or obj.precio_base is None:
+            return mark_safe(
+                '<span class="preview-sin-imagen">—</span>'
+            )
         precio_formateado = "{:,.0f}".format(int(obj.precio_con_descuento))
         return format_html(
             '<span style="font-weight:bold;color:#155724;">Gs. {0}</span>',
