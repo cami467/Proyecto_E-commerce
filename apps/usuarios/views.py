@@ -115,3 +115,30 @@ class LogoutView(APIView):
             {"mensaje": "Sesion cerrada exitosamente."},
             status=status.HTTP_200_OK
         )
+        
+
+class CambiarPasswordView(APIView):
+    """
+    Endpoint para cambiar la contraseña del usuario autenticado.
+    Requiere autenticación.
+    POST /api/usuarios/cambiar-password/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        usuario = request.user
+        password_actual = request.data.get("password_actual")
+        password_nueva = request.data.get("password_nueva")
+
+        if not usuario.check_password(password_actual):
+            return Response(
+                {"error": "La contraseña actual es incorrecta"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        usuario.set_password(password_nueva)
+        usuario.save()
+        return Response(
+            {"mensaje": "Contraseña cambiada correctamente"},
+            status=status.HTTP_200_OK
+        )
