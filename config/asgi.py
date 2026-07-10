@@ -18,4 +18,22 @@ os.environ.setdefault(
     config("DJANGO_SETTINGS_MODULE", default="config.settings.prod"),
 )
 
-application = get_asgi_application()
+# Se inicializa Django ANTES de importar routing/consumers/middleware propios
+# (que a su vez importan modelos). Si se importa antes de esta línea, Django
+# todavía no registró las apps y explota con AppRegistryNotReady.
+django_asgi_app = get_asgi_application()
+
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.security.websocket import AllowedHostsOriginValidator
+
+import apps.notificaciones.routing
+from apps.notificaciones.middleware import JWTAuthMiddleware
+
+application = ProtocolTypeRouter({
+    "http": django_asgi_app,
+    "websocket": AllowedHostsOriginValidator(
+        JWTAuthMiddleware(
+            URLRouter(apps.notificaciones.routing.websocket_urlpatterns)
+        )
+    ),
+})

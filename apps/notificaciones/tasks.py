@@ -1,5 +1,7 @@
 from celery import shared_task
 from django.contrib.auth import get_user_model
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 from .models import Notificacion
 
@@ -9,7 +11,8 @@ Usuario = get_user_model()
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
 def crear_notificacion(self, usuario_id, tipo, titulo, mensaje, referencia_id=""):
     """
-    Tarea asíncrona que crea una notificación para un usuario en la base de datos.
+    Tarea asíncrona que crea una notificación para un usuario en la base de datos
+    y la empuja en tiempo real por WebSocket si el usuario tiene una conexión activa.
         Se ejecuta en segundo plano a través de Celery para no bloquear el ciclo
         de respuesta (Request/Response) HTTP de la API principal.
         
@@ -37,6 +40,36 @@ def crear_notificacion(self, usuario_id, tipo, titulo, mensaje, referencia_id=""
         mensaje=mensaje,
         referencia_id=str(referencia_id) if referencia_id else "",
     )
+
+    # empujar la notificación por WebSocket si hay conexión activa 
+    # Si el usuario no está conectado en este momento, group_send simplemente
+    # no le llega a nadie (no falla, no reintenta) — la notificación ya quedó
+    # guardada en la base y la va a ver la próxima vez que abra la app.
+    try:
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"notificaciones_usuario_{usuario_id}",
+            {
+                "type": "notificacion_nueva",
+                "data": {
+                    "id": str(notificacion.id),
+                    "tipo": notificacion.tipo,
+                    "tipo_display": notificacion.get_tipo_display(),
+                    "titulo": notificacion.titulo,
+                    "mensaje": notificacion.mensaje,
+                    "referencia_id": notificacion.referencia_id,
+                    "fecha_creacion": notificacion.fecha_creacion.isoformat(),
+                    "fecha_leida": notificacion.fecha_leida,
+                    "leida": notificacion.leida,
+                },
+            },
+        )
+    except Exception:
+        # Si Redis/Channels falla por algún motivo, no queremos que la tarea
+        # de Celery entera falle ni reintente — la notificación ya se guardó
+        # correctamente en la base, que es lo importante.
+        pass
+
     return f"Notificación {notificacion.id} creada para {usuario.username}."
 
 

@@ -24,6 +24,7 @@ ALLOWED_HOSTS = []
 
 # Aplicaciones nativas de Django
 DJANGO_APPS = [
+    "daphne",                     #  servidor ASGI (debe ir antes que staticfiles)
     "django.contrib.admin",       # Panel de administración
     "django.contrib.auth",        # Sistema de autenticación
     "django.contrib.contenttypes",# Tipos de contenido
@@ -41,6 +42,7 @@ THIRD_PARTY_APPS = [
     "drf_spectacular",            # Documentación automática de la API
     "corsheaders",                # Manejo de cabeceras CORS
     "django_celery_results",    # Almacena resultados de tareas de Celery en la base de datos
+    "channels",                   # soporte de WebSockets (Django Channels)
 ]
 
 # Aplicaciones propias del proyecto
@@ -94,6 +96,9 @@ TEMPLATES = [
 
 # Punto de entrada WSGI para servidores
 WSGI_APPLICATION = "config.wsgi.application"
+
+# Punto de entrada ASGI para servidores (NUEVO: necesario para WebSockets con Channels)
+ASGI_APPLICATION = "config.asgi.application"
 
 # Configuración de la base de datos (PostgreSQL)
 DATABASES = {
@@ -154,8 +159,6 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        # Protege el login contra intentos repetidos de fuerza bruta por IP.
-        # En producción puede ajustarse según monitoreo real.
         "login": "5/minute",
     },
     "DEFAULT_PAGINATION_CLASS": "core.pagination.PaginacionEstandar", # Paginación personalizada
@@ -170,23 +173,11 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "ENUM_NAME_OVERRIDES": {
-        # Un solo nombre para el set de estados de Orden
-        # (cubre Orden.estado, HistorialEstadoOrden.estado_anterior y estado_nuevo)
         "EstadoOrdenEnum": "apps.ordenes.models.Orden.Estado",
-
-        # Set distinto: estados de Pago
         "EstadoPagoEnum": "apps.pagos.models.Pago.Estado",
-
-        # Pasarela de pago
         "PasarelaEnum": "apps.pagos.models.Pago.Pasarela",
-
-        # Tipo de descuento del Cupón
         "TipoCuponEnum": "apps.cupones.models.Cupon.TipoDescuento",
-
-        # Tipo de Notificación
         "TipoNotificacionEnum": "apps.notificaciones.models.Notificacion.Tipo",
-
-        # Tasa de IVA del Producto
         "TasaIVAEnum": "apps.productos.models.Producto.TasaIVA",
     },
     "ENUM_GENERATE_CHOICE_DESCRIPTION": False,
@@ -194,50 +185,44 @@ SPECTACULAR_SETTINGS = {
 
 # Configuración de JWT (tokens)
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),   # Duración del token de acceso
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),   # Duración del token de refresco
-    "ROTATE_REFRESH_TOKENS": True,                 # Rotar tokens de refresco
-    "BLACKLIST_AFTER_ROTATION": True,             # No invalidar tokens antiguos
-    "AUTH_HEADER_TYPES": ("Bearer",),              # Tipo de encabezado
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 # CORS
-CORS_ALLOWED_ORIGINS = [] # Lista de dominios permitidos para consumir la API
-CORS_ALLOW_ALL_ORIGINS = False # Si es True, permite cualquier origen (inseguro en producción)
-                               # Si está en False, solo se aceptan los orígenes definidos en CORS_ALLOWED_ORIGINS.
-                               
+CORS_ALLOWED_ORIGINS = []
+CORS_ALLOW_ALL_ORIGINS = False
 
 # ==============================================================================
 # CONFIGURACIÓN DE CELERY
 # ==============================================================================
 
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
-"""
-URL del broker (Redis) que Celery usa como cola de mensajes.
-En Docker, el host suele ser el nombre del servicio (ej: redis://redis:6379/0).
-"""
-
 CELERY_RESULT_BACKEND = "django-db"
-"""
-Guarda los resultados de las tareas en la base de datos usando
-django-celery-results. Permite consultar el estado de cada tarea
-desde el admin de Django.
-"""
-
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
-"""
-Usa la misma zona horaria configurada en Django (America/Asuncion)
-para que los timestamps de las tareas sean consistentes.
-"""
-
 CELERY_TASK_TRACK_STARTED = True
-"""Permite ver en el admin cuándo una tarea pasó de PENDING a STARTED."""
-
 CELERY_TASK_TIME_LIMIT = 30 * 60
-"""Límite máximo de 30 minutos por tarea, para evitar tareas colgadas."""
+
+# ==============================================================================
+# CONFIGURACIÓN DE DJANGO CHANNELS (WebSockets)  <-- BLOQUE NUEVO
+# ==============================================================================
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            # Reutiliza el mismo Redis que ya usa Celery (mismo host/puerto,
+            # distinta responsabilidad: Channels usa sus propias claves internas).
+            "hosts": [config("CELERY_BROKER_URL", default="redis://localhost:6379/0")],
+        },
+    },
+}
 
 # ==============================================================================
 # DATOS DE LA EMPRESA PARA FACTURACIÓN
