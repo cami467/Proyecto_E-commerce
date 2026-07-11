@@ -340,3 +340,49 @@ class AutenticacionAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("first_name", response.data)
         self.assertIn("last_name", response.data)
+
+
+class UsuarioAdminListAPITestCase(APITestCase):
+    """
+    Suite de pruebas QA para el endpoint de listado de usuarios
+    para administradores (GET /api/usuarios/).
+
+    Cubre:
+        - Un admin (is_staff=True) puede listar usuarios.
+        - Un cliente normal no puede acceder (403).
+        - Un usuario no autenticado no puede acceder (401).
+    """
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_user(
+            username="admin_test",
+            email="admin@gmail.com",
+            password="Password123!",
+            is_staff=True,
+        )
+        self.cliente = Usuario.objects.create_user(
+            username="cliente_test_admin_list",
+            email="cliente@gmail.com",
+            password="Password123!",
+        )
+        self.url = reverse("usuarios-admin-list")
+
+    def test_admin_puede_listar_usuarios(self):
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_cliente_no_puede_listar_usuarios(self):
+        self.client.force_authenticate(user=self.cliente)
+        response = self.client.get(self.url)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_usuario_no_autenticado_no_puede_listar(self):
+        response = self.client.get(self.url)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )

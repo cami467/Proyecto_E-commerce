@@ -369,7 +369,45 @@ class UsuarioSerializer(serializers.ModelSerializer):
     def validate_telefono(self, value):
         """Reutiliza la misma regla de telefono del registro al editar perfil."""
         return RegistroSerializer().validate_telefono(value)
-    
+
+
+# ==============================================================================
+# SERIALIZER DE ADMINISTRADOR
+# ==============================================================================
+
+class UsuarioAdminSerializer(serializers.ModelSerializer):
+    """
+    Serializer utilizado únicamente por administradores
+    para consultar usuarios registrados.
+
+    A diferencia de UsuarioSerializer (que expone el perfil del propio
+    usuario autenticado y permite edición), este es de solo lectura
+    (read_only_fields = fields) y expone campos adicionales que un
+    admin necesita ver pero que un usuario normal no debería (is_active,
+    is_staff, last_login) para auditoría/gestión de cuentas.
+    """
+    nombre_completo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Usuario
+        fields = (
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "nombre_completo",
+            "telefono",
+            "avatar",
+            "is_active",
+            "is_staff",
+            "date_joined",
+            "last_login",
+        )
+        read_only_fields = fields
+
+    def get_nombre_completo(self, obj):
+        nombre = f"{obj.first_name} {obj.last_name}".strip()
+        return nombre or obj.email
 
 
 # ==============================================================================

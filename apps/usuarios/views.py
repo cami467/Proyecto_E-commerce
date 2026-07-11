@@ -12,6 +12,7 @@ from .serializers import (
     LogoutSerializer,
     RegistroSerializer,
     UsuarioSerializer,
+    UsuarioAdminSerializer,
 )
 
 Usuario = get_user_model()
@@ -141,4 +142,23 @@ class CambiarPasswordView(APIView):
         return Response(
             {"mensaje": "Contraseña cambiada correctamente"},
             status=status.HTTP_200_OK
+        )
+
+
+class UsuarioAdminListView(generics.ListAPIView):
+    """
+    Lista los usuarios registrados.
+
+    Solo puede acceder un usuario administrador.
+    GET /api/usuarios/
+    """
+
+    serializer_class = UsuarioAdminSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_queryset(self):
+        return (
+            Usuario.objects
+            .all()
+            .order_by("-date_joined")
         )
