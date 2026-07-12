@@ -66,6 +66,27 @@ class Pago(ModeloBase):
         blank=True,
         help_text="Fecha en que la pasarela proceso el pago."
     )
+    comprobante = models.FileField(
+        upload_to="comprobantes/",
+        null=True,
+        blank=True,
+        help_text=(
+            "Comprobante de transferencia subido por el cliente "
+            "(imagen o PDF). Se usa FileField en lugar de ImageField "
+            "porque tambien debe aceptar PDF, que ImageField rechazaria."
+        ),
+    )
+    referencia_cliente = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Numero de referencia u operacion que el cliente indica al transferir.",
+    )
+    observacion_cliente = models.TextField(
+        blank=True,
+        default="",
+        help_text="Comentario opcional del cliente sobre la transferencia realizada.",
+    )
 
     class Meta:
         verbose_name = "Pago"

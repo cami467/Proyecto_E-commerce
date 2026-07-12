@@ -145,6 +145,9 @@ class PagoSerializer(serializers.ModelSerializer):
         read_only=True,
         help_text="True si el pago puede ser reembolsado."
     )
+    comprobante_url = serializers.SerializerMethodField(
+        help_text="URL absoluta del comprobante de transferencia, si existe."
+    )
 
     class Meta:
         model = Pago
@@ -161,6 +164,9 @@ class PagoSerializer(serializers.ModelSerializer):
             "monto",
             "id_transaccion",
             "respuesta_pasarela",
+            "comprobante_url",
+            "referencia_cliente",
+            "observacion_cliente",
             "fecha_procesado",
             "fecha_creacion",
             "fecha_actualizacion",
@@ -181,6 +187,17 @@ class PagoSerializer(serializers.ModelSerializer):
         if not data.get("id_transaccion"):
             data["id_transaccion"] = None
         return data
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_comprobante_url(self, obj):
+        """Retorna URL absoluta segura del comprobante, o None si no hay."""
+        request = self.context.get("request")
+        if obj.comprobante and request:
+            try:
+                return request.build_absolute_uri(obj.comprobante.url)
+            except ValueError:
+                pass
+        return None
 
 
 # ==============================================================================
@@ -305,3 +322,59 @@ class SimularPagoSerializer(serializers.Serializer):
     def validate_id_transaccion(self, value: str) -> str:
         """Normaliza el ID de transacción simulado."""
         return value.strip().upper() if value else _generar_id_transaccion_simulado()
+
+# ==============================================================================
+# SERIALIZER PARA SUBIR COMPROBANTE DE TRANSFERENCIA
+# ==============================================================================
+
+EXTENSIONES_COMPROBANTE_PERMITIDAS = ["jpg", "jpeg", "png", "webp", "pdf"]
+"""
+Extensiones aceptadas para el comprobante. Se valida a mano porque el
+campo del modelo es FileField (no ImageField), así que Django no aplica
+ninguna validación automática de tipo de archivo.
+"""
+
+TAMANO_MAXIMO_COMPROBANTE_MB = 5
+
+
+class SubirComprobanteSerializer(serializers.Serializer):
+    """
+    Serializer para que el cliente suba el comprobante de una
+    transferencia bancaria, junto con datos opcionales de referencia.
+
+    No es un ModelSerializer porque no crea ni actualiza el Pago
+    directamente: la vista es la que decide qué campos persistir,
+    siguiendo el mismo criterio que CrearPagoSerializer y
+    SimularPagoSerializer de este archivo.
+    """
+    comprobante = serializers.FileField(
+        help_text="Archivo del comprobante: imagen (jpg, png, webp) o PDF."
+    )
+    referencia_cliente = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Numero de referencia u operacion de la transferencia.",
+    )
+    observacion_cliente = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Comentario opcional del cliente.",
+    )
+
+    def validate_comprobante(self, value):
+        """Valida extension y tamaño del archivo subido."""
+        extension = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if extension not in EXTENSIONES_COMPROBANTE_PERMITIDAS:
+            raise serializers.ValidationError(
+                "Formato no permitido. Subí una imagen (jpg, png, webp) o un PDF."
+            )
+
+        if value.size > TAMANO_MAXIMO_COMPROBANTE_MB * 1024 * 1024:
+            raise serializers.ValidationError(
+                f"El comprobante no puede superar {TAMANO_MAXIMO_COMPROBANTE_MB} MB."
+            )
+
+        return value
