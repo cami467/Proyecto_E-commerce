@@ -322,9 +322,10 @@ class UsuarioSerializer(serializers.ModelSerializer):
             "nombre_completo",
             "telefono",
             "avatar",
+            "is_staff",
             "date_joined",
         ]
-        read_only_fields = ["id", "date_joined"]
+        read_only_fields = ["id", "is_staff", "date_joined"]
         
     def validate_first_name(self, value):
         return normalizar_nombre(value)
