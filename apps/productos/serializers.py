@@ -445,6 +445,7 @@ class ProductoWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Producto
         fields = [
+            "id",
             "nombre",
             "categoria",
             "descripcion",
@@ -453,7 +454,9 @@ class ProductoWriteSerializer(serializers.ModelSerializer):
             "tasa_iva",
             "es_destacado",
             "esta_activo",
+            "slug",
         ]
+        read_only_fields = ["id", "slug"]
 
     def validate_nombre(self, value):
         """Normaliza y valida el nombre del producto."""

@@ -225,6 +225,14 @@ class ProductoViewSet(SerializerContextMixin, viewsets.ModelViewSet):
             context=self.get_serializer_context()
         )
         return Response(serializer.data)
+    
+    def perform_destroy(self, instance):
+        """
+        No borra fisicamente: usa el borrado logico ya definido en ModeloBase.
+        Evita romper con ProtectedError si el producto tiene ordenes asociadas,
+        y mantiene consistencia con el resto del sistema (categorias, cupones).
+        """
+        instance.desactivar()
 
 
 # ==============================================================================
