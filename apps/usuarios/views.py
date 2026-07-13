@@ -1,3 +1,5 @@
+from decimal import Decimal
+from django.db.models import Sum
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,6 +8,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model
+from apps.ordenes.models import Orden
+from apps.pagos.models import Pago
 
 from .serializers import (
     EmailTokenObtainPairSerializer,
@@ -161,4 +165,79 @@ class UsuarioAdminListView(generics.ListAPIView):
             Usuario.objects
             .all()
             .order_by("-date_joined")
+        )
+        
+class DashboardClienteView(APIView):
+    """
+    Devuelve el resumen personal del usuario autenticado.
+
+    GET /api/usuarios/dashboard/
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        usuario = request.user
+
+        ordenes = (
+            Orden.objects
+            .filter(usuario=usuario)
+            .order_by("-fecha_creacion")
+        )
+
+        pagos = (
+            Pago.objects
+            .filter(orden__usuario=usuario)
+            .order_by("-fecha_creacion")
+        )
+
+        pagos_aprobados = pagos.filter(
+            estado=Pago.Estado.APPROVED
+        )
+
+        dinero_gastado = (
+            pagos_aprobados.aggregate(
+                total=Sum("monto")
+            )["total"]
+            or Decimal("0")
+        )
+
+        ultima_orden = ordenes.first()
+        ultimo_pago = pagos.first()
+
+        ultima_compra_data = None
+
+        if ultima_orden:
+            ultima_compra_data = {
+                "id": str(ultima_orden.id),
+                "numero_orden": ultima_orden.numero_orden_display,
+                "estado": ultima_orden.estado,
+                "estado_display": ultima_orden.get_estado_display(),
+                "total": ultima_orden.total,
+                "fecha_creacion": ultima_orden.fecha_creacion,
+            }
+
+        ultimo_pago_data = None
+
+        if ultimo_pago:
+            ultimo_pago_data = {
+                "id": str(ultimo_pago.id),
+                "orden_id": str(ultimo_pago.orden_id),
+                "pasarela": ultimo_pago.pasarela,
+                "pasarela_display": ultimo_pago.get_pasarela_display(),
+                "estado": ultimo_pago.estado,
+                "estado_display": ultimo_pago.get_estado_display(),
+                "monto": ultimo_pago.monto,
+                "fecha_creacion": ultimo_pago.fecha_creacion,
+                "fecha_procesado": ultimo_pago.fecha_procesado,
+            }
+
+        return Response(
+            {
+                "pedidos_realizados": ordenes.count(),
+                "dinero_gastado": dinero_gastado,
+                "productos_favoritos": 0,
+                "ultima_compra": ultima_compra_data,
+                "ultimo_pago": ultimo_pago_data,
+            }
         )

@@ -2,12 +2,14 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-
+from django.urls import reverse
+from rest_framework import status
 from apps.productos.models import Categoria, Producto, Variante
 from apps.carrito.models import Carrito, ItemCarrito
 from core.exceptions import CarritoVacio, StockInsuficiente
 from .models import Orden, ItemOrden, HistorialEstadoOrden
 from .services import crear_orden_desde_carrito
+from rest_framework.test import APITestCase
 
 Usuario = get_user_model()
 
@@ -293,3 +295,58 @@ class OrdenReglasNegocioTestCase(TestCase):
             crear_orden_desde_carrito(usuario=self.usuario)
 
         self.assertEqual(Orden.objects.count(), 0)
+
+
+class EstadisticasAdminAPITestCase(APITestCase):
+    """
+    Pruebas de acceso al endpoint de estadisticas administrativas.
+    Cubre: acceso permitido a staff, denegado a cliente autenticado,
+    y denegado a usuario anonimo.
+    """
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_user(
+            username="admin_test",
+            email="admin@correo.com",
+            password="Password123!",
+            is_staff=True,
+        )
+
+        self.cliente = Usuario.objects.create_user(
+            username="cliente_test",
+            email="cliente@correo.com",
+            password="Password123!",
+        )
+
+        self.url = reverse("estadisticas-admin")
+
+    def test_admin_puede_ver_estadisticas(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertIn("resumen", response.data)
+        self.assertIn("ventas_por_mes", response.data)
+        self.assertIn("productos_mas_vendidos", response.data)
+
+    def test_cliente_no_puede_ver_estadisticas(self):
+        self.client.force_authenticate(user=self.cliente)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_usuario_anonimo_no_puede_ver_estadisticas(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
