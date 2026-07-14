@@ -21,3 +21,4 @@ media/
 
 htmlcov/
 .coverage
+datos_locales.json

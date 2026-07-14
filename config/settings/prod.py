@@ -24,3 +24,13 @@ CSRF_TRUSTED_ORIGINS = csv_config("CSRF_TRUSTED_ORIGINS")
 # Solo debe activarse si la API se sirve detrás de un proxy HTTPS
 # que envía X-Forwarded-Proto correctamente.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Almacenamiento de archivos multimedia en Cloudinary (solo producción)
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
